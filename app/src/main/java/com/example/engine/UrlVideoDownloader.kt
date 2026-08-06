@@ -1,10 +1,8 @@
 package com.example.engine
 
 import android.content.Context
-import android.net.Uri
 import android.util.Patterns
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -84,38 +82,15 @@ class UrlVideoDownloader(private val context: Context) {
         url: String,
         onProgress: (progress: Float, downloadedBytes: Long, totalBytes: Long) -> Unit
     ): Result<File> = withContext(Dispatchers.IO) {
-        if (url.contains("private") || url.contains("restricted")) {
-            return@withContext Result.failure(Exception("YouTube video is private or age-restricted."))
-        }
-
-        val tempFile = File(context.cacheDir, "yt_downloaded_${System.currentTimeMillis()}.mp4")
-        
-        try {
-            val transcoder = VideoTranscoder(context)
-            val dummyItem = com.example.data.model.VideoQueueItem(
-                title = "YouTube Stream",
-                sourceType = com.example.data.model.VideoSourceType.YOUTUBE,
-                sourcePathOrUrl = url,
-                durationMs = 15_000L
+        // Downloading a YouTube video requires resolving its page into a real playable
+        // media stream (e.g. via a yt-dlp/youtube-extractor library), which this project
+        // does not depend on. Fail clearly instead of feeding the page URL to the video
+        // decoder, which can only ever produce a broken or unrelated output file.
+        Result.failure(
+            UnsupportedOperationException(
+                "YouTube downloads aren't supported yet: no video extractor is wired up. Use a direct video file URL or a local file instead."
             )
-            val transcodeRes = transcoder.transcodeVideo(
-                item = dummyItem,
-                onProgress = { prog, _, _, written ->
-                    onProgress(prog, written, 15_000_000L)
-                },
-                isPaused = { false },
-                isCancelled = { false }
-            )
-            if (transcodeRes.isSuccess) {
-                val downloadedVideo = transcodeRes.getOrThrow()
-                downloadedVideo.copyTo(tempFile, overwrite = true)
-                Result.success(tempFile)
-            } else {
-                Result.failure(Exception("Failed to download YouTube stream"))
-            }
-        } catch (e: Exception) {
-            Result.failure(Exception("Failed to save YouTube stream: ${e.localizedMessage}"))
-        }
+        )
     }
 
     private fun determineExtension(url: String, contentType: String?): String {

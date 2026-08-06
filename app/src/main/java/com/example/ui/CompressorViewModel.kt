@@ -21,6 +21,8 @@ import com.example.data.model.ResourceMode
 import com.example.data.model.VideoCompressionSettings
 import com.example.data.model.VideoQueueItem
 import com.example.data.model.VideoSourceType
+import com.example.engine.TranscodeCancelledException
+import com.example.engine.TranscodePausedException
 import com.example.engine.UrlVideoDownloader
 import com.example.engine.VideoTranscoder
 import kotlinx.coroutines.Dispatchers
@@ -108,10 +110,10 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                     isSystemPreset = true
                 ),
                 PresetEntity(
-                    presetName = "4K High Efficiency (HEVC/MKV)",
+                    presetName = "4K High Efficiency (HEVC/MP4)",
                     resolutionName = ResolutionPreset.RES_4K.name,
                     bitrateKbps = 6000,
-                    formatName = OutputFormat.MKV.name,
+                    formatName = OutputFormat.MP4.name,
                     removeAudio = false,
                     resourceModeName = ResourceMode.SPEED.name,
                     isSystemPreset = true
@@ -224,6 +226,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
         if (_isBatchRunning.value) return
         _isBatchRunning.value = true
         _isBatchPaused.value = false
+        cancelledJobIds.clear()
 
         batchJob = viewModelScope.launch(Dispatchers.IO) {
             val queuedItems = _queue.value.filter {
@@ -231,8 +234,17 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
             }
 
             for (item in queuedItems) {
-                if (!cancelledJobIds.contains(item.id)) {
-                    processSingleItem(item)
+                if (cancelledJobIds.contains(item.id)) continue
+
+                // A paused item keeps retrying (from the start; the encoder has no mid-export
+                // resume) until the user resumes or cancels, holding the whole batch here.
+                while (true) {
+                    val outcome = processSingleItem(item)
+                    if (outcome != ProcessOutcome.PAUSED) break
+                    while (_isBatchPaused.value && !cancelledJobIds.contains(item.id)) {
+                        delay(300)
+                    }
+                    if (cancelledJobIds.contains(item.id)) break
                 }
             }
 
@@ -246,7 +258,9 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    private suspend fun processSingleItem(item: VideoQueueItem) {
+    private enum class ProcessOutcome { COMPLETED, FAILED, PAUSED, CANCELLED }
+
+    private suspend fun processSingleItem(item: VideoQueueItem): ProcessOutcome {
         var currentSourcePath = item.sourcePathOrUrl
 
         // Step 1: Download if URL or YouTube
@@ -267,7 +281,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                 val err = downloadResult.exceptionOrNull()?.message ?: "Download failed"
                 updateItemStatus(item.id, CompressionItemState.FAILED, error = err)
                 saveToHistory(item.copy(status = CompressionItemState.FAILED, errorMessage = err))
-                return
+                return ProcessOutcome.FAILED
             }
 
             currentSourcePath = downloadResult.getOrThrow().absolutePath
@@ -306,11 +320,23 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
             )
             updateItemInQueue(item.id) { finalItem }
             saveToHistory(finalItem)
-        } else {
-            val err = result.exceptionOrNull()?.message ?: "Compression failed"
-            val failedItem = updatedItem.copy(status = CompressionItemState.FAILED, errorMessage = err)
-            updateItemInQueue(item.id) { failedItem }
-            saveToHistory(failedItem)
+            return ProcessOutcome.COMPLETED
+        }
+
+        return when (val err = result.exceptionOrNull()) {
+            is TranscodePausedException -> {
+                updateItemInQueue(item.id) { it.copy(status = CompressionItemState.PAUSED) }
+                ProcessOutcome.PAUSED
+            }
+            is TranscodeCancelledException -> {
+                ProcessOutcome.CANCELLED
+            }
+            else -> {
+                val failedItem = updatedItem.copy(status = CompressionItemState.FAILED, errorMessage = err?.message ?: "Compression failed")
+                updateItemInQueue(item.id) { failedItem }
+                saveToHistory(failedItem)
+                ProcessOutcome.FAILED
+            }
         }
     }
 

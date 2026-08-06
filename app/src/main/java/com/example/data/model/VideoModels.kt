@@ -26,12 +26,11 @@ enum class BitratePreset(val label: String, val targetBitrateKbps: Int) {
     CUSTOM("Custom Bitrate", 0)
 }
 
+// Android's MediaMuxer (and Media3 Transformer, which is built on it) can only write
+// MP4 containers reliably on every device; WEBM/MKV/MOV/AVI required an external muxer
+// library that this project doesn't depend on, so those options are not offered.
 enum class OutputFormat(val extension: String, val codecName: String, val mimeType: String) {
-    MP4("mp4", "MP4 Container", "video/mp4"),
-    WEBM("webm", "WebM Container", "video/webm"),
-    MKV("mkv", "MKV Container", "video/x-matroska"),
-    MOV("mov", "QuickTime MOV", "video/quicktime"),
-    AVI("avi", "AVI Container", "video/x-msvideo")
+    MP4("mp4", "MP4 Container", "video/mp4")
 }
 
 enum class ResourceMode(val title: String, val description: String, val ramPercentage: Float) {
