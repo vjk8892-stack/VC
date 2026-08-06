@@ -95,7 +95,7 @@ class VideoTranscoder(private val context: Context) {
 
         val outputFile = buildOutputFile(item)
         val (targetWidth, targetHeight) = item.getEffectiveDimensions()
-        val targetBitrateBps = (item.getEffectiveBitrateKbps() * 1000).coerceAtLeast(100_000)
+        val targetBitrateBps = (item.getEffectiveVideoBitrateKbps() * 1000).coerceAtLeast(100_000)
         val totalDurationMs = if (item.durationMs > 0) item.durationMs else 15_000L
         val durationSec = (totalDurationMs / 1000.0).coerceAtLeast(1.0)
 

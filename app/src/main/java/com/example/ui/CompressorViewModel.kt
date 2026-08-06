@@ -476,7 +476,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
             compressedSizeBytes = item.compressedSizeBytes,
             durationMs = item.durationMs,
             resolutionLabel = "${w}x${h}",
-            bitrateKbps = item.getEffectiveBitrateKbps(),
+            bitrateKbps = item.getEffectiveVideoBitrateKbps(),
             format = item.settings.format.extension,
             outputPath = item.outputPath,
             isSuccessful = item.status == CompressionItemState.COMPLETED,

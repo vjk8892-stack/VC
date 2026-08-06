@@ -97,6 +97,26 @@ data class VideoQueueItem(
         }
     }
 
+    /** The source's own overall bitrate (video+audio+container), derived from real file size
+     * and duration - far more trustworthy than container bitrate metadata, which is often
+     * absent. Null when we don't have real size/duration yet (e.g. a URL item pre-download). */
+    fun sourceBitrateKbps(): Int? {
+        if (originalSizeBytes <= 0L || durationMs <= 0L) return null
+        val kbps = (originalSizeBytes * 8.0 / 1000.0) / (durationMs / 1000.0)
+        return kbps.toInt().coerceAtLeast(1)
+    }
+
+    /** The video bitrate actually used for encoding: the user's requested bitrate, capped so
+     * the encoder is never asked to spend more bits/sec than the source already averages - a
+     * request to "compress" a video must not legitimately produce a same-size-or-larger file. */
+    fun getEffectiveVideoBitrateKbps(): Int {
+        val requestedKbps = getEffectiveBitrateKbps()
+        val audioKbps = if (settings.removeAudio) 0 else 128
+        val sourceKbps = sourceBitrateKbps() ?: return requestedKbps
+        val safeTotalKbps = (sourceKbps * 0.85).toInt().coerceAtLeast(300)
+        return requestedKbps.coerceAtMost((safeTotalKbps - audioKbps).coerceAtLeast(150))
+    }
+
     fun getEffectiveDimensions(): Pair<Int, Int> {
         // CUSTOM means the user typed an exact width/height: honor it as-is (just rounded to
         // even) instead of reinterpreting it through the source video's aspect ratio below.
@@ -136,41 +156,14 @@ data class VideoQueueItem(
         return Pair(evenW.coerceAtLeast(160), evenH.coerceAtLeast(120))
     }
 
+    /** Mirrors the bitrate math the real encoder uses (getEffectiveVideoBitrateKbps), so this
+     * preview never promises savings the actual compression pass won't deliver. */
     fun estimateCompressedSizeBytes(): Long {
         val durationSec = if (durationMs > 0L) durationMs / 1000.0 else 30.0
-        val targetBitrateKbps = getEffectiveBitrateKbps()
-        
-        val codecFactor = when (settings.videoCodec) {
-            VideoCodec.HEVC_H265 -> 0.65f
-            VideoCodec.AV1 -> 0.55f
-            VideoCodec.VP9 -> 0.80f
-            VideoCodec.AVC_H264 -> 1.00f
-        }
-        
-        val resFactor = when (settings.resolution) {
-            ResolutionPreset.RES_360P -> 0.45f
-            ResolutionPreset.RES_480P -> 0.60f
-            ResolutionPreset.RES_720P -> 0.75f
-            ResolutionPreset.RES_1080P -> 1.00f
-            ResolutionPreset.RES_4K -> 1.80f
-            ResolutionPreset.ORIGINAL -> 1.00f
-            ResolutionPreset.CUSTOM -> {
-                if (settings.customWidth > 0 && settings.customHeight > 0) {
-                    ((settings.customWidth * settings.customHeight).toDouble() / (1920 * 1080)).toFloat().coerceIn(0.2f, 2.0f)
-                } else 0.80f
-            }
-        }
-
-        val effectiveBitrateKbps = (targetBitrateKbps * codecFactor * resFactor).toInt().coerceAtLeast(250)
         val audioKbps = if (settings.removeAudio) 0 else 128
-        val totalBitrateKbps = effectiveBitrateKbps + audioKbps
-        
+        val totalBitrateKbps = getEffectiveVideoBitrateKbps() + audioKbps
+
         val estimatedBytes = (totalBitrateKbps * 1000L / 8.0 * durationSec).toLong()
-        
-        return if (originalSizeBytes > 0L) {
-            estimatedBytes.coerceAtMost((originalSizeBytes * 0.92).toLong()).coerceAtLeast(100_000L)
-        } else {
-            estimatedBytes.coerceAtLeast(100_000L)
-        }
+        return estimatedBytes.coerceAtLeast(50_000L)
     }
 }
