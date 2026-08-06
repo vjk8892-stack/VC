@@ -17,3 +17,10 @@ val TextMain = Color(0xFFE6E1E5)
 val TextMuted = Color(0xFFCAC4D0)
 val OnPrimaryDark = Color(0xFF381E72)
 
+// Light Palette
+val LightCanvas = Color(0xFFFFFBFE)
+val LightSurface = Color(0xFFF7F2FA)
+val LightSurfaceVariant = Color(0xFFE7E0EC)
+val TextMainLight = Color(0xFF1C1B1F)
+val TextMutedLight = Color(0xFF49454F)
+

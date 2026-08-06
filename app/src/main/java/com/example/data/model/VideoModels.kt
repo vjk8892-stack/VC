@@ -98,17 +98,23 @@ data class VideoQueueItem(
     }
 
     fun getEffectiveDimensions(): Pair<Int, Int> {
+        // CUSTOM means the user typed an exact width/height: honor it as-is (just rounded to
+        // even) instead of reinterpreting it through the source video's aspect ratio below.
+        if (settings.resolution == ResolutionPreset.CUSTOM) {
+            val evenW = ((settings.customWidth + 1) / 2) * 2
+            val evenH = ((settings.customHeight + 1) / 2) * 2
+            return Pair(evenW.coerceAtLeast(160), evenH.coerceAtLeast(120))
+        }
+
         val (rawW, rawH) = when (settings.resolution) {
             ResolutionPreset.ORIGINAL -> Pair(originalWidth, originalHeight)
-            ResolutionPreset.CUSTOM -> Pair(settings.customWidth, settings.customHeight)
             else -> Pair(settings.resolution.width, settings.resolution.height)
         }
-        
+
         // Maintain aspect ratio if raw dimensions match standard resolution preset
         if (originalWidth > 0 && originalHeight > 0 && rawW > 0 && rawH > 0) {
             val isPortrait = originalHeight > originalWidth
             val maxDim = rawW.coerceAtLeast(rawH)
-            val minDim = rawW.coerceAtMost(rawH)
             val aspect = originalWidth.toFloat() / originalHeight.toFloat()
             
             val calcW: Int

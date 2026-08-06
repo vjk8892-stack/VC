@@ -28,19 +28,19 @@ private val DarkColorScheme = darkColorScheme(
     onError = OnPrimaryDark
 )
 
-private val LightColorScheme = darkColorScheme(
+private val LightColorScheme = lightColorScheme(
     primary = SkyBlue60,
     onPrimary = OnPrimaryDark,
     primaryContainer = SkyBlue80,
     onPrimaryContainer = OnPrimaryDark,
     secondary = TealAccent,
     onSecondary = OnPrimaryDark,
-    background = DarkCanvas,
-    onBackground = TextMain,
-    surface = DarkSurface,
-    onSurface = TextMain,
-    surfaceVariant = DarkSurfaceVariant,
-    onSurfaceVariant = TextMuted,
+    background = LightCanvas,
+    onBackground = TextMainLight,
+    surface = LightSurface,
+    onSurface = TextMainLight,
+    surfaceVariant = LightSurfaceVariant,
+    onSurfaceVariant = TextMutedLight,
     error = RoseError,
     onError = OnPrimaryDark
 )
@@ -51,7 +51,7 @@ fun MyApplicationTheme(
   dynamicColor: Boolean = false,
   content: @Composable () -> Unit,
 ) {
-  val colorScheme = if (darkTheme) DarkColorScheme else DarkColorScheme
+  val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
 
   MaterialTheme(colorScheme = colorScheme, typography = Typography, content = content)
 }

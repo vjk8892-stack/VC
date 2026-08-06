@@ -27,6 +27,7 @@ import com.example.engine.UrlVideoDownloader
 import com.example.engine.VideoTranscoder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -84,12 +85,18 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
     private val pausedJobIds = mutableSetOf<String>()
     private val cancelledJobIds = mutableSetOf<String>()
 
+    // Items whose settings were customized individually via the per-item dialog; excluded
+    // from the global-settings sync below so they don't get silently reverted.
+    private val customizedItemIds = mutableSetOf<String>()
+
     init {
         seedInitialSystemPresets()
     }
 
     private fun seedInitialSystemPresets() {
         viewModelScope.launch(Dispatchers.IO) {
+            if (presetDao.countSystemPresets() > 0) return@launch
+
             val defaultPresets = listOf(
                 PresetEntity(
                     presetName = "Discord (Under 25MB)",
@@ -138,10 +145,11 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
     fun updateGlobalSettings(updateBlock: (VideoCompressionSettings) -> VideoCompressionSettings) {
         _globalSettings.update { current ->
             val updated = updateBlock(current)
-            // If global settings mode is active, sync settings to queued items
+            // If global settings mode is active, sync settings to queued items that haven't
+            // been individually customized via the per-item dialog.
             if (_useGlobalSettings.value) {
                 _queue.update { list ->
-                    list.map { item -> item.copy(settings = updated) }
+                    list.map { item -> if (item.id in customizedItemIds) item else item.copy(settings = updated) }
                 }
             }
             updated
@@ -196,6 +204,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun updateItemSettings(itemId: String, settings: VideoCompressionSettings) {
+        customizedItemIds.add(itemId)
         _queue.update { list ->
             list.map { if (it.id == itemId) it.copy(settings = settings) else it }
         }
@@ -203,6 +212,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
 
     fun removeItem(itemId: String) {
         cancelledJobIds.add(itemId)
+        customizedItemIds.remove(itemId)
         _queue.update { list -> list.filterNot { it.id == itemId } }
     }
 
@@ -219,6 +229,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
 
     fun clearQueue() {
         _queue.value.forEach { cancelledJobIds.add(it.id) }
+        customizedItemIds.clear()
         _queue.value = emptyList()
     }
 
@@ -290,7 +301,22 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
         // Step 2: Transcode / Compress
         updateItemStatus(item.id, CompressionItemState.PROCESSING, progress = 0.35f)
 
-        val updatedItem = _queue.value.find { it.id == item.id }?.copy(sourcePathOrUrl = currentSourcePath) ?: item
+        var updatedItem = _queue.value.find { it.id == item.id }?.copy(sourcePathOrUrl = currentSourcePath) ?: item
+
+        // URL/YouTube items only have placeholder duration/resolution/fps until the real file
+        // is on disk; refresh from the actual downloaded video before scaling/encoding decisions
+        // (aspect ratio, ETA, history duration) are made from it.
+        if (item.sourceType == VideoSourceType.DIRECT_URL || item.sourceType == VideoSourceType.YOUTUBE) {
+            val info = transcoder.extractVideoInfo(currentSourcePath)
+            updatedItem = updatedItem.copy(
+                durationMs = info.durationMs,
+                originalWidth = info.width,
+                originalHeight = info.height,
+                originalBitrateKbps = info.bitrateKbps,
+                originalFps = info.fps
+            )
+            updateItemInQueue(item.id) { updatedItem }
+        }
 
         val result = transcoder.transcodeVideo(
             item = updatedItem,
