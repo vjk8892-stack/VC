@@ -1,0 +1,6 @@
+{
+  "name": "Video Compressor",
+  "description": "Desktop/Web grade video compression tool with custom resolution, bitrate presets, format converter, CPU/GPU controls, intelligent RAM modes, and batch URL downloader.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
