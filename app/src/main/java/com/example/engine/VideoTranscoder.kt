@@ -1,6 +1,7 @@
 package com.example.engine
 
 import android.content.Context
+import android.media.MediaCodecInfo
 import android.media.MediaCodecList
 import android.media.MediaMetadataRetriever
 import android.net.Uri
@@ -135,7 +136,15 @@ class VideoTranscoder(private val context: Context) {
         val outcome = CompletableDeferred<Result<Unit>>()
 
         val encoderFactory = DefaultEncoderFactory.Builder(context)
-            .setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(bitrateBps).build())
+            .setRequestedVideoEncoderSettings(
+                VideoEncoderSettings.Builder()
+                    .setBitrate(bitrateBps)
+                    // CBR instead of the default VBR: VBR only targets an average, and hardware
+                    // encoders commonly overshoot it on complex content, which is exactly why
+                    // real output kept coming in bigger than the size estimate predicted.
+                    .setBitrateMode(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
+                    .build()
+            )
             .setEnableFallback(true) // HEVC -> H.264 (or whatever the device actually supports) when unavailable
             .build()
 
