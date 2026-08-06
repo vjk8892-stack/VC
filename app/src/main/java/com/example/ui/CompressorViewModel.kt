@@ -278,7 +278,11 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
         if (item.sourceType == VideoSourceType.DIRECT_URL || item.sourceType == VideoSourceType.YOUTUBE) {
             updateItemStatus(item.id, CompressionItemState.DOWNLOADING, progress = 0.05f)
 
-            val downloadResult = downloader.fetchAndDownload(item.sourcePathOrUrl) { progress, downloaded, total ->
+            val downloadResult = downloader.fetchAndDownload(
+                urlStr = item.sourcePathOrUrl,
+                isPaused = { pausedJobIds.contains(item.id) || _isBatchPaused.value },
+                isCancelled = { cancelledJobIds.contains(item.id) }
+            ) { progress, downloaded, total ->
                 updateItemInQueue(item.id) {
                     it.copy(
                         status = CompressionItemState.DOWNLOADING,
@@ -289,9 +293,11 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
             }
 
             if (downloadResult.isFailure) {
-                val err = downloadResult.exceptionOrNull()?.message ?: "Download failed"
-                updateItemStatus(item.id, CompressionItemState.FAILED, error = err)
-                saveToHistory(item.copy(status = CompressionItemState.FAILED, errorMessage = err))
+                val err = downloadResult.exceptionOrNull()
+                if (err is TranscodeCancelledException) return ProcessOutcome.CANCELLED
+                val message = err?.message ?: "Download failed"
+                updateItemStatus(item.id, CompressionItemState.FAILED, error = message)
+                saveToHistory(item.copy(status = CompressionItemState.FAILED, errorMessage = message))
                 return ProcessOutcome.FAILED
             }
 

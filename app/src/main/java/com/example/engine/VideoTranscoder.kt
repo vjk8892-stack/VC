@@ -29,8 +29,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-class TranscodePausedException : Exception("Compression paused by user")
-class TranscodeCancelledException : Exception("Compression cancelled by user")
+class TranscodePausedException : Exception("Paused by user")
+class TranscodeCancelledException : Exception("Cancelled by user")
 
 class VideoTranscoder(private val context: Context) {
 

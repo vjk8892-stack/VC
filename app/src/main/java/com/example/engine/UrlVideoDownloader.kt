@@ -20,6 +20,8 @@ class UrlVideoDownloader(private val context: Context) {
 
     suspend fun fetchAndDownload(
         urlStr: String,
+        isPaused: () -> Boolean = { false },
+        isCancelled: () -> Boolean = { false },
         onProgress: (progress: Float, downloadedBytes: Long, totalBytes: Long) -> Unit
     ): Result<File> = withContext(Dispatchers.IO) {
         val trimmed = urlStr.trim()
@@ -37,7 +39,10 @@ class UrlVideoDownloader(private val context: Context) {
             return@withContext handleYouTubeLink(trimmed, onProgress)
         }
 
+        if (isCancelled()) return@withContext Result.failure(TranscodeCancelledException())
+
         // Standard direct video URL download
+        var tempFile: File? = null
         try {
             val request = Request.Builder()
                 .url(trimmed)
@@ -53,7 +58,7 @@ class UrlVideoDownloader(private val context: Context) {
             val contentLength = body.contentLength()
             val fileExt = determineExtension(trimmed, response.header("Content-Type"))
 
-            val tempFile = File(context.cacheDir, "downloaded_${System.currentTimeMillis()}.$fileExt")
+            tempFile = File(context.cacheDir, "downloaded_${System.currentTimeMillis()}.$fileExt")
             val inputStream: InputStream = body.byteStream()
             val outputStream = FileOutputStream(tempFile)
 
@@ -62,6 +67,18 @@ class UrlVideoDownloader(private val context: Context) {
             var totalRead = 0L
 
             while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+                if (isCancelled()) {
+                    outputStream.close(); inputStream.close(); tempFile.delete()
+                    return@withContext Result.failure(TranscodeCancelledException())
+                }
+                while (isPaused() && !isCancelled()) {
+                    Thread.sleep(200)
+                }
+                if (isCancelled()) {
+                    outputStream.close(); inputStream.close(); tempFile.delete()
+                    return@withContext Result.failure(TranscodeCancelledException())
+                }
+
                 outputStream.write(buffer, 0, bytesRead)
                 totalRead += bytesRead
                 val progress = if (contentLength > 0) (totalRead.toFloat() / contentLength).coerceIn(0f, 1f) else 0.5f
@@ -74,6 +91,7 @@ class UrlVideoDownloader(private val context: Context) {
 
             Result.success(tempFile)
         } catch (e: Exception) {
+            tempFile?.delete()
             Result.failure(Exception("Download failed: ${e.localizedMessage ?: "Network error"}"))
         }
     }
