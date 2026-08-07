@@ -95,6 +95,12 @@ fun HistoryLogsSection(
                 }
             }
 
+            val successfulItems = historyList.filter { it.isSuccessful && it.compressedSizeBytes > 0 }
+            if (successfulItems.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                HistoryStatsRow(successfulItems)
+            }
+
             Spacer(modifier = Modifier.height(12.dp))
 
             if (historyList.isEmpty()) {
@@ -252,4 +258,45 @@ fun HistoryLogsSection(
 fun formatTimestamp(timeMs: Long): String {
     val sdf = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
     return sdf.format(Date(timeMs))
+}
+
+/** Aggregate "what has this app actually saved you" summary - a cheap, high-visibility stat
+ * built entirely from data already recorded per compression, encouraging return use. */
+@Composable
+private fun HistoryStatsRow(successfulItems: List<HistoryEntity>, modifier: Modifier = Modifier) {
+    val totalOriginal = successfulItems.sumOf { it.originalSizeBytes }
+    val totalCompressed = successfulItems.sumOf { it.compressedSizeBytes }
+    val totalSaved = (totalOriginal - totalCompressed).coerceAtLeast(0L)
+    val avgSavingsPercent = calculateSavingsPercent(totalOriginal, totalCompressed)
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = EmeraldSuccess.copy(alpha = 0.12f),
+        modifier = modifier.fillMaxWidth().testTag("history_stats_row")
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            StatChip(value = formatBytes(totalSaved), label = "Total Saved")
+            StatChip(value = "$avgSavingsPercent%", label = "Avg Savings")
+            StatChip(value = "${successfulItems.size}", label = "Videos Compressed")
+        }
+    }
+}
+
+@Composable
+private fun StatChip(value: String, label: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            color = EmeraldSuccess
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
 }
