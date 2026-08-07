@@ -20,6 +20,7 @@ import androidx.media3.transformer.ProgressHolder
 import androidx.media3.transformer.TransformationRequest
 import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.VideoEncoderSettings
+import com.example.data.model.VideoCodec
 import com.example.data.model.VideoQueueItem
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -75,6 +76,10 @@ class VideoTranscoder(private val context: Context) {
 
     /** Whether this device exposes an HEVC encoder; if false, requests fall back to H.264 automatically. */
     fun isHevcEncodingSupported(): Boolean = isEncoderAvailable(MimeTypes.VIDEO_H265)
+
+    /** Whether this device has a real hardware/software encoder for the given codec, so the UI
+     * can warn when a pick will silently fall back to something else at encode time. */
+    fun isCodecSupported(codec: VideoCodec): Boolean = isEncoderAvailable(codec.mimeType)
 
     private fun isEncoderAvailable(mime: String): Boolean {
         return try {

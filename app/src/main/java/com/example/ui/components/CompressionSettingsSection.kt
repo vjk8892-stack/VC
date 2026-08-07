@@ -61,7 +61,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.db.PresetEntity
 import com.example.data.model.BitratePreset
-import com.example.data.model.OutputFormat
 import com.example.data.model.ResolutionPreset
 import com.example.data.model.VideoCodec
 import com.example.data.model.VideoCompressionSettings
@@ -79,6 +78,7 @@ fun CompressionSettingsSection(
     onSaveCurrentPreset: (String) -> Unit,
     useGlobalSettings: Boolean,
     onToggleUseGlobalSettings: (Boolean) -> Unit,
+    supportedCodecs: Set<VideoCodec> = VideoCodec.entries.toSet(),
     activeVideoItem: VideoQueueItem? = null,
     modifier: Modifier = Modifier
 ) {
@@ -252,6 +252,14 @@ fun CompressionSettingsSection(
                     )
                 }
             }
+            if (settings.videoCodec !in supportedCodecs) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "No ${settings.videoCodec.label} encoder on this device - will fall back to a supported codec automatically.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -383,29 +391,24 @@ fun CompressionSettingsSection(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Output Container Format",
+                        text = "Output Format",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(6.dp))
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        items(OutputFormat.entries) { fmt ->
-                            val isSelected = settings.format == fmt
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (isSelected) SkyBlue60 else MaterialTheme.colorScheme.surfaceVariant,
-                                modifier = Modifier.clickable { onSettingsChanged(settings.copy(format = fmt)) }
-                            ) {
-                                Text(
-                                    text = fmt.extension.uppercase(),
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                    ),
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                )
-                            }
-                        }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Movie,
+                            contentDescription = null,
+                            tint = SkyBlue60,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "MP4 (H.264/HEVC compatible everywhere)",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                     }
                 }
 

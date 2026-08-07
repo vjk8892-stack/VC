@@ -18,6 +18,7 @@ import com.example.data.model.CompressionItemState
 import com.example.data.model.OutputFormat
 import com.example.data.model.ResolutionPreset
 import com.example.data.model.ResourceMode
+import com.example.data.model.VideoCodec
 import com.example.data.model.VideoCompressionSettings
 import com.example.data.model.VideoQueueItem
 import com.example.data.model.VideoSourceType
@@ -51,11 +52,12 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
     // UI State
     val maxSystemCores: Int = Runtime.getRuntime().availableProcessors()
     val isGpuAvailable: Boolean = transcoder.isGpuHardwareAccelerationAvailable()
+    val supportedCodecs: Set<VideoCodec> = VideoCodec.entries.filter { transcoder.isCodecSupported(it) }.toSet()
 
     private val _queue = MutableStateFlow<List<VideoQueueItem>>(emptyList())
     val queue: StateFlow<List<VideoQueueItem>> = _queue.asStateFlow()
 
-    private val _globalSettings = MutableStateFlow(VideoCompressionSettings(cpuCores = maxSystemCores, gpuAcceleration = isGpuAvailable))
+    private val _globalSettings = MutableStateFlow(VideoCompressionSettings())
     val globalSettings: StateFlow<VideoCompressionSettings> = _globalSettings.asStateFlow()
 
     private val _useGlobalSettings = MutableStateFlow(true)
@@ -244,7 +246,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                 it.status == CompressionItemState.QUEUED || it.status == CompressionItemState.PAUSED || it.status == CompressionItemState.FAILED
             }
 
-            for (item in queuedItems) {
+            for ((index, item) in queuedItems.withIndex()) {
                 if (cancelledJobIds.contains(item.id)) continue
 
                 // A paused item keeps retrying (from the start; the encoder has no mid-export
@@ -256,6 +258,14 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                         delay(300)
                     }
                     if (cancelledJobIds.contains(item.id)) break
+                }
+
+                // Cool-down pacing between items per Resource Mode - a real effect (reduces
+                // sustained thermal/battery load in Low Resource Mode) rather than a setting
+                // that looked configurable but didn't change anything about the actual run.
+                if (index < queuedItems.lastIndex && !cancelledJobIds.contains(item.id)) {
+                    val cooldownMs = item.settings.resourceMode.interItemCooldownMs
+                    if (cooldownMs > 0L) delay(cooldownMs)
                 }
             }
 

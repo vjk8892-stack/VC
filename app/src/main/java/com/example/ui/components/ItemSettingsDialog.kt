@@ -1,6 +1,5 @@
 package com.example.ui.components
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,7 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MusicOff
@@ -24,7 +22,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -42,7 +39,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.BitratePreset
-import com.example.data.model.OutputFormat
 import com.example.data.model.ResolutionPreset
 import com.example.data.model.VideoCodec
 import com.example.data.model.VideoQueueItem
@@ -53,7 +49,8 @@ import com.example.ui.theme.SkyBlue60
 fun ItemSettingsDialog(
     item: VideoQueueItem,
     onDismiss: () -> Unit,
-    onSaveSettings: (VideoQueueItem) -> Unit
+    onSaveSettings: (VideoQueueItem) -> Unit,
+    supportedCodecs: Set<VideoCodec> = VideoCodec.entries.toSet()
 ) {
     var tempSettings by remember { mutableStateOf(item.settings) }
 
@@ -83,6 +80,14 @@ fun ItemSettingsDialog(
                             )
                         )
                     }
+                }
+                if (tempSettings.videoCodec !in supportedCodecs) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "No ${tempSettings.videoCodec.label} encoder on this device - will fall back automatically.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -134,23 +139,11 @@ fun ItemSettingsDialog(
                     Column {
                         Text("Output Format", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
                         Spacer(modifier = Modifier.height(4.dp))
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            items(OutputFormat.entries) { fmt ->
-                                val isSelected = tempSettings.format == fmt
-                                Surface(
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = if (isSelected) SkyBlue60 else MaterialTheme.colorScheme.surfaceVariant,
-                                    modifier = Modifier.clickable { tempSettings = tempSettings.copy(format = fmt) }
-                                ) {
-                                    Text(
-                                        text = fmt.extension.uppercase(),
-                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                        color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    )
-                                }
-                            }
-                        }
+                        Text(
+                            text = "MP4",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = SkyBlue60
+                        )
                     }
 
                     Column(horizontalAlignment = Alignment.End) {

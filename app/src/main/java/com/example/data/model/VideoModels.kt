@@ -33,10 +33,13 @@ enum class OutputFormat(val extension: String, val codecName: String, val mimeTy
     MP4("mp4", "MP4 Container", "video/mp4")
 }
 
-enum class ResourceMode(val title: String, val description: String, val ramPercentage: Float) {
-    SPEED("Speed Mode", "Allocates max hardware resources for highest FPS encoding", 0.75f),
-    BALANCED("Balanced Mode", "Optimal resource allocation for multi-tasking", 0.50f),
-    LOW_RESOURCE("Low Resource Mode", "Eco power usage to prevent device heating", 0.25f)
+// interItemCooldownMs is a real, applied effect: startBatchProcessing() waits this long
+// between queued items, so higher modes genuinely reduce sustained thermal/battery load
+// during a batch instead of being a cosmetic-only setting.
+enum class ResourceMode(val title: String, val description: String, val interItemCooldownMs: Long) {
+    SPEED("Speed Mode", "No pause between queued files - fastest way through a batch", 0L),
+    BALANCED("Balanced Mode", "Short pause between files to ease sustained heat and battery use", 1_500L),
+    LOW_RESOURCE("Low Resource Mode", "Longer pause between files to keep the device cooler", 4_000L)
 }
 
 enum class VideoSourceType(val label: String) {
@@ -63,10 +66,7 @@ data class VideoCompressionSettings(
     val customBitrateKbps: Int = 2000,
     val format: OutputFormat = OutputFormat.MP4,
     val removeAudio: Boolean = false,
-    val cpuCores: Int = Runtime.getRuntime().availableProcessors().coerceIn(1, 16),
-    val gpuAcceleration: Boolean = true,
-    val resourceMode: ResourceMode = ResourceMode.BALANCED,
-    val targetSizeBytes: Long? = null
+    val resourceMode: ResourceMode = ResourceMode.BALANCED
 )
 
 data class VideoQueueItem(

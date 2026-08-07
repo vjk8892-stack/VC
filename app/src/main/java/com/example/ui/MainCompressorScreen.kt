@@ -210,13 +210,12 @@ fun MainCompressorScreen(
                             onSaveCurrentPreset = { viewModel.saveCustomPreset(it) },
                             useGlobalSettings = useGlobalSettings,
                             onToggleUseGlobalSettings = { viewModel.toggleUseGlobalSettings(it) },
+                            supportedCodecs = viewModel.supportedCodecs,
                             activeVideoItem = queue.firstOrNull()
                         )
 
                         ResourceControlsSection(
                             settings = globalSettings,
-                            maxCores = viewModel.maxSystemCores,
-                            isGpuAvailable = viewModel.isGpuAvailable,
                             onSettingsChanged = { viewModel.updateGlobalSettings { _ -> it } }
                         )
 
@@ -276,7 +275,8 @@ fun MainCompressorScreen(
             onSaveSettings = { updated ->
                 viewModel.updateItemSettings(updated.id, updated.settings)
                 editingItem = null
-            }
+            },
+            supportedCodecs = viewModel.supportedCodecs
         )
     }
 
