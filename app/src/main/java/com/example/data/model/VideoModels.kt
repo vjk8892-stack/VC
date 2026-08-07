@@ -222,11 +222,29 @@ data class VideoQueueItem(
         return estimatedBytes.coerceAtLeast(50_000L)
     }
 
+    /** Back-solves the video bitrate to request in order to land close to targetBytes, given
+     * this item's own audio bitrate and (post-trim) duration. Compensates for the same
+     * REAL_WORLD_CBR_EFFICIENCY undershoot estimateCompressedSizeBytes() already accounts for -
+     * without it, a naive 1:1 solve would ask for a bitrate whose real (and previewed) output
+     * lands ~12% under the size the user actually typed in. Capped by
+     * maxSelectableVideoBitrateKbps() so a target that isn't achievable without growing the file
+     * gets the closest safe bitrate instead of silently exceeding that guarantee. */
+    fun bitrateForTargetSizeBytes(targetBytes: Long): Int {
+        val durationSec = if (effectiveDurationMs() > 0L) effectiveDurationMs() / 1000.0 else 30.0
+        val audioKbps = if (settings.removeAudio) 0 else (originalAudioBitrateKbps ?: 128)
+        val totalKbps = targetBytes * 8.0 / 1000.0 / durationSec
+        val idealVideoKbps = (totalKbps - audioKbps).coerceAtLeast(150.0)
+        val compensatedVideoKbps = (idealVideoKbps / REAL_WORLD_CBR_EFFICIENCY).toInt()
+        val cap = maxSelectableVideoBitrateKbps()
+        return if (cap != null) compensatedVideoKbps.coerceAtMost(cap) else compensatedVideoKbps
+    }
+
     companion object {
         // Derived from real-device measurements: two independent compression runs with CBR
         // forced came in at ~89% and ~87% of the requested video bitrate. The encoder's actual
-        // target (getEffectiveVideoBitrateKbps) is left untouched - only the size preview is
-        // corrected to reflect what hardware encoders on this device actually deliver.
+        // target (getEffectiveVideoBitrateKbps) is left untouched - only the size preview (and
+        // the target-size back-solve above, which must agree with that preview) are corrected to
+        // reflect what hardware encoders on this device actually deliver.
         private const val REAL_WORLD_CBR_EFFICIENCY = 0.88
     }
 }

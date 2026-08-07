@@ -491,14 +491,10 @@ fun CompressionSettingsSection(
                 Button(
                     onClick = {
                         val targetMb = targetSizeMbInput.toDoubleOrNull()
-                        val durationSec = ((activeVideoItem?.durationMs?.takeIf { it > 0 }) ?: 30_000L) / 1000.0
                         if (targetMb != null && targetMb > 0.0) {
-                            val targetBytes = targetMb * 1024.0 * 1024.0
-                            val audioKbps = if (settings.removeAudio) 0 else 128
-                            val totalKbps = (targetBytes * 8.0 / 1000.0 / durationSec).toInt()
-                            val requestedVideoKbps = (totalKbps - audioKbps).coerceAtLeast(150)
-                            val cappedKbps = maxSelectableBitrateKbps?.let { requestedVideoKbps.coerceAtMost(it) } ?: requestedVideoKbps
-                            onSettingsChanged(settings.copy(bitrate = BitratePreset.CUSTOM, customBitrateKbps = cappedKbps))
+                            val targetBytes = (targetMb * 1024.0 * 1024.0).toLong()
+                            val requestedKbps = presetBasisItem.bitrateForTargetSizeBytes(targetBytes)
+                            onSettingsChanged(settings.copy(bitrate = BitratePreset.CUSTOM, customBitrateKbps = requestedKbps))
                         }
                     },
                     enabled = (targetSizeMbInput.toDoubleOrNull() ?: 0.0) > 0.0,

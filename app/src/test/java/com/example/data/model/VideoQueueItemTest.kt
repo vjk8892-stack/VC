@@ -53,6 +53,33 @@ class VideoQueueItemTest {
         assertEquals(0L, item(durationMs = 0L, settings = settings).effectiveDurationMs())
     }
 
+    // --- bitrateForTargetSizeBytes ---
+
+    @Test
+    fun `bitrateForTargetSizeBytes yields an estimate close to the requested target`() {
+        // Large, high-bitrate source so the safe-ceiling cap never kicks in here - this test is
+        // only about whether the back-solved bitrate actually reproduces the target size once
+        // run back through the same estimate the UI preview uses.
+        val source = item(originalSizeBytes = 500_000_000L, durationMs = 60_000L)
+        val targetBytes = 20L * 1024 * 1024
+        val requestedKbps = source.bitrateForTargetSizeBytes(targetBytes)
+        val withRequestedBitrate = source.copy(settings = source.settings.copy(customBitrateKbps = requestedKbps))
+        val estimatedBytes = withRequestedBitrate.estimateCompressedSizeBytes()
+
+        val diffRatio = kotlin.math.abs(estimatedBytes - targetBytes).toDouble() / targetBytes
+        assertTrue("estimate $estimatedBytes should be close to target $targetBytes", diffRatio < 0.02)
+    }
+
+    @Test
+    fun `bitrateForTargetSizeBytes is capped by maxSelectableVideoBitrateKbps`() {
+        // Low-bitrate source, unreasonably large target: the ideal solve would ask for far more
+        // than this source can safely be given, so the result must not exceed the safety cap.
+        val source = item(originalSizeBytes = 5_000_000L, durationMs = 60_000L)
+        val cap = source.maxSelectableVideoBitrateKbps()!!
+        val hugeTargetBytes = 200L * 1024 * 1024
+        assertEquals(cap, source.bitrateForTargetSizeBytes(hugeTargetBytes))
+    }
+
     // --- sourceBitrateKbps ---
 
     @Test
