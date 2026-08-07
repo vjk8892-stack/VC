@@ -47,6 +47,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -96,6 +97,18 @@ fun CompressionSettingsSection(
         originalSizeBytes = 50_000_000L,
         durationMs = 30_000L
     )).copy(settings = settings)
+
+    // Only a real queued item has a trustworthy source bitrate to lock the slider to - the
+    // fallback sampleItem above is a rough stand-in for the size preview only.
+    val nativeBitrateKbps = activeVideoItem?.copy(settings = settings)?.sourceBitrateKbps()
+    val maxSelectableBitrateKbps = activeVideoItem?.copy(settings = settings)?.maxSelectableVideoBitrateKbps()
+
+    LaunchedEffect(maxSelectableBitrateKbps, settings.customBitrateKbps) {
+        val cap = maxSelectableBitrateKbps
+        if (cap != null && settings.customBitrateKbps > cap) {
+            onSettingsChanged(settings.copy(customBitrateKbps = cap))
+        }
+    }
 
     val sampleOriginalBytes = if (sampleItem.originalSizeBytes > 0L) sampleItem.originalSizeBytes else 50_000_000L
     val estimatedOutputBytes = sampleItem.estimateCompressedSizeBytes()
@@ -377,6 +390,15 @@ fun CompressionSettingsSection(
                 )
             }
 
+            if (nativeBitrateKbps != null) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Native bitrate: %.1f Mbps - max selectable is capped below this so compression always actually saves space".format(nativeBitrateKbps / 1000.0),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
             Spacer(modifier = Modifier.height(6.dp))
 
             // Bitrate Presets Chips
@@ -386,7 +408,8 @@ fun CompressionSettingsSection(
                     FilterChip(
                         selected = isSelected,
                         onClick = {
-                            val newKbps = if (preset != BitratePreset.CUSTOM) preset.targetBitrateKbps else settings.customBitrateKbps
+                            val requestedKbps = if (preset != BitratePreset.CUSTOM) preset.targetBitrateKbps else settings.customBitrateKbps
+                            val newKbps = maxSelectableBitrateKbps?.let { requestedKbps.coerceAtMost(it) } ?: requestedKbps
                             onSettingsChanged(settings.copy(bitrate = preset, customBitrateKbps = newKbps))
                         },
                         label = { Text(preset.label, fontSize = 12.sp) },
@@ -398,13 +421,14 @@ fun CompressionSettingsSection(
                 }
             }
 
-            // Bitrate Slider
+            // Bitrate Slider - capped to this video's real max selectable bitrate once known
+            val sliderMaxKbps = (maxSelectableBitrateKbps ?: 15000).coerceAtLeast(300)
             Slider(
-                value = settings.customBitrateKbps.toFloat(),
+                value = settings.customBitrateKbps.toFloat().coerceAtMost(sliderMaxKbps.toFloat()),
                 onValueChange = {
                     onSettingsChanged(settings.copy(bitrate = BitratePreset.CUSTOM, customBitrateKbps = it.toInt()))
                 },
-                valueRange = 300f..15000f,
+                valueRange = 150f..sliderMaxKbps.toFloat(),
                 colors = SliderDefaults.colors(
                     thumbColor = SkyBlue60,
                     activeTrackColor = SkyBlue60

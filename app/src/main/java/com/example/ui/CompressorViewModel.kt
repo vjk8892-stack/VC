@@ -175,6 +175,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                     originalHeight = info.height,
                     originalBitrateKbps = info.bitrateKbps,
                     originalFps = info.fps,
+                    originalAudioBitrateKbps = info.audioBitrateKbps,
                     settings = _globalSettings.value
                 )
             }
@@ -329,7 +330,8 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                 originalWidth = info.width,
                 originalHeight = info.height,
                 originalBitrateKbps = info.bitrateKbps,
-                originalFps = info.fps
+                originalFps = info.fps,
+                originalAudioBitrateKbps = info.audioBitrateKbps
             )
             updateItemInQueue(item.id) { updatedItem }
         }

@@ -27,6 +27,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,6 +54,16 @@ fun ItemSettingsDialog(
     supportedCodecs: Set<VideoCodec> = VideoCodec.entries.toSet()
 ) {
     var tempSettings by remember { mutableStateOf(item.settings) }
+
+    val nativeBitrateKbps = item.sourceBitrateKbps()
+    val maxSelectableBitrateKbps = item.copy(settings = tempSettings).maxSelectableVideoBitrateKbps()
+
+    LaunchedEffect(maxSelectableBitrateKbps, tempSettings.customBitrateKbps) {
+        val cap = maxSelectableBitrateKbps
+        if (cap != null && tempSettings.customBitrateKbps > cap) {
+            tempSettings = tempSettings.copy(customBitrateKbps = cap)
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -121,10 +132,19 @@ fun ItemSettingsDialog(
                     Text("${tempSettings.customBitrateKbps} kbps", style = MaterialTheme.typography.labelMedium, color = SkyBlue60)
                 }
 
+                if (nativeBitrateKbps != null) {
+                    Text(
+                        text = "Native bitrate: %.1f Mbps - max selectable is capped below this".format(nativeBitrateKbps / 1000.0),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                val sliderMaxKbps = (maxSelectableBitrateKbps ?: 12000).coerceAtLeast(300)
                 Slider(
-                    value = tempSettings.customBitrateKbps.toFloat(),
+                    value = tempSettings.customBitrateKbps.toFloat().coerceAtMost(sliderMaxKbps.toFloat()),
                     onValueChange = { tempSettings = tempSettings.copy(bitrate = BitratePreset.CUSTOM, customBitrateKbps = it.toInt()) },
-                    valueRange = 300f..12000f,
+                    valueRange = 150f..sliderMaxKbps.toFloat(),
                     colors = SliderDefaults.colors(thumbColor = SkyBlue60, activeTrackColor = SkyBlue60)
                 )
 

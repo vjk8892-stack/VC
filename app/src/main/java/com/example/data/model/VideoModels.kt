@@ -63,7 +63,9 @@ data class VideoCompressionSettings(
     val customHeight: Int = 720,
     val videoCodec: VideoCodec = VideoCodec.HEVC_H265,
     val bitrate: BitratePreset = BitratePreset.MEDIUM,
-    val customBitrateKbps: Int = 2000,
+    // Matches BitratePreset.MEDIUM.targetBitrateKbps so the displayed value and the value
+    // actually used by getEffectiveBitrateKbps() agree before the user touches anything.
+    val customBitrateKbps: Int = 2500,
     val format: OutputFormat = OutputFormat.MP4,
     val removeAudio: Boolean = false,
     val resourceMode: ResourceMode = ResourceMode.BALANCED
@@ -80,6 +82,10 @@ data class VideoQueueItem(
     val originalHeight: Int = 1080,
     val originalBitrateKbps: Int = 8000,
     val originalFps: Int = 30,
+    // Read from the source audio track's own format (when available) instead of assumed - the
+    // encoder passes audio through unchanged when no audio effects are requested, so this is
+    // what the output will actually carry, not a guess.
+    val originalAudioBitrateKbps: Int? = null,
     val compressedSizeBytes: Long = 0L,
     val status: CompressionItemState = CompressionItemState.QUEUED,
     val progress: Float = 0f, // 0.0 to 1.0
@@ -106,15 +112,25 @@ data class VideoQueueItem(
         return kbps.toInt().coerceAtLeast(1)
     }
 
+    /** The real ceiling the Bitrate Target control should enforce: the most video bitrate that
+     * can be requested and still guarantee a smaller output than the source, derived from the
+     * source's own real average bitrate (sourceBitrateKbps), not container metadata. Null when
+     * the source's real bitrate isn't known yet (e.g. a URL item before download), in which case
+     * there's no honest number to cap the UI to. */
+    fun maxSelectableVideoBitrateKbps(): Int? {
+        val sourceKbps = sourceBitrateKbps() ?: return null
+        val audioKbps = if (settings.removeAudio) 0 else (originalAudioBitrateKbps ?: 128)
+        val safeTotalKbps = (sourceKbps * 0.85).toInt().coerceAtLeast(300)
+        return (safeTotalKbps - audioKbps).coerceAtLeast(150)
+    }
+
     /** The video bitrate actually used for encoding: the user's requested bitrate, capped so
      * the encoder is never asked to spend more bits/sec than the source already averages - a
      * request to "compress" a video must not legitimately produce a same-size-or-larger file. */
     fun getEffectiveVideoBitrateKbps(): Int {
         val requestedKbps = getEffectiveBitrateKbps()
-        val audioKbps = if (settings.removeAudio) 0 else 128
-        val sourceKbps = sourceBitrateKbps() ?: return requestedKbps
-        val safeTotalKbps = (sourceKbps * 0.85).toInt().coerceAtLeast(300)
-        return requestedKbps.coerceAtMost((safeTotalKbps - audioKbps).coerceAtLeast(150))
+        val maxKbps = maxSelectableVideoBitrateKbps() ?: return requestedKbps
+        return requestedKbps.coerceAtMost(maxKbps)
     }
 
     fun getEffectiveDimensions(): Pair<Int, Int> {
@@ -157,10 +173,13 @@ data class VideoQueueItem(
     }
 
     /** Mirrors the bitrate math the real encoder uses (getEffectiveVideoBitrateKbps), so this
-     * preview never promises savings the actual compression pass won't deliver. */
+     * preview never promises savings the actual compression pass won't deliver. Uses the
+     * source's real audio bitrate (when known) rather than a flat guess, since the encoder
+     * passes audio through unchanged - a wrong guess here was the main source of estimate vs
+     * actual-output drift. */
     fun estimateCompressedSizeBytes(): Long {
         val durationSec = if (durationMs > 0L) durationMs / 1000.0 else 30.0
-        val audioKbps = if (settings.removeAudio) 0 else 128
+        val audioKbps = if (settings.removeAudio) 0 else (originalAudioBitrateKbps ?: 128)
         val totalBitrateKbps = getEffectiveVideoBitrateKbps() + audioKbps
 
         val estimatedBytes = (totalBitrateKbps * 1000L / 8.0 * durationSec).toLong()

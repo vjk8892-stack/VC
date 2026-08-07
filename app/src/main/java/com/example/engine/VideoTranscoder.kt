@@ -3,6 +3,8 @@ package com.example.engine
 import android.content.Context
 import android.media.MediaCodecInfo
 import android.media.MediaCodecList
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Environment
@@ -41,7 +43,8 @@ class VideoTranscoder(private val context: Context) {
         val height: Int,
         val durationMs: Long,
         val bitrateKbps: Int,
-        val fps: Int
+        val fps: Int,
+        val audioBitrateKbps: Int? = null
     )
 
     fun extractVideoInfo(sourcePathOrUri: String): VideoInfo {
@@ -60,12 +63,42 @@ class VideoTranscoder(private val context: Context) {
             val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 15_000L
             val bitrate = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toIntOrNull()?.let { it / 1000 } ?: 6000
             val fps = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)?.toIntOrNull() ?: 30
+            val audioBitrate = extractAudioBitrateKbps(sourcePathOrUri)
 
-            VideoInfo(width, height, duration, bitrate, fps)
+            VideoInfo(width, height, duration, bitrate, fps, audioBitrate)
         } catch (e: Exception) {
             VideoInfo(1920, 1080, 15_000L, 6000, 30)
         } finally {
             try { retriever.release() } catch (_: Exception) {}
+        }
+    }
+
+    /** The source audio track's own encoded bitrate, when the container exposes it - this is
+     * what the output will actually carry too, since the encoder passes audio through unchanged
+     * when no audio effects are requested (i.e. it does not re-encode audio to a fixed rate). */
+    private fun extractAudioBitrateKbps(sourcePathOrUri: String): Int? {
+        val extractor = MediaExtractor()
+        return try {
+            if (sourcePathOrUri.startsWith("content://") || sourcePathOrUri.startsWith("file://")) {
+                extractor.setDataSource(context, Uri.parse(sourcePathOrUri), null)
+            } else if (sourcePathOrUri.startsWith("http://") || sourcePathOrUri.startsWith("https://")) {
+                extractor.setDataSource(sourcePathOrUri, HashMap<String, String>())
+            } else {
+                extractor.setDataSource(sourcePathOrUri)
+            }
+
+            for (i in 0 until extractor.trackCount) {
+                val format = extractor.getTrackFormat(i)
+                val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
+                if (mime.startsWith("audio/") && format.containsKey(MediaFormat.KEY_BIT_RATE)) {
+                    return (format.getInteger(MediaFormat.KEY_BIT_RATE) / 1000).coerceAtLeast(1)
+                }
+            }
+            null
+        } catch (e: Exception) {
+            null
+        } finally {
+            try { extractor.release() } catch (_: Exception) {}
         }
     }
 
