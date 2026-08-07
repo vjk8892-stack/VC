@@ -411,6 +411,12 @@ fun CompressionSettingsSection(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "This is the target sent to the encoder - real hardware commonly lands ~10-15% under it, which the size preview below already accounts for.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
 
             Spacer(modifier = Modifier.height(6.dp))
 
