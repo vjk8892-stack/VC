@@ -88,6 +88,7 @@ fun CompressionSettingsSection(
     var showSavePresetDialog by remember { mutableStateOf(false) }
     var presetNameInput by remember { mutableStateOf("") }
     var advancedExpanded by remember { mutableStateOf(false) }
+    var targetSizeMbInput by remember { mutableStateOf("") }
 
     // Calculate dynamic estimated size using single source of truth model
     val sampleItem = (activeVideoItem ?: VideoQueueItem(
@@ -458,6 +459,64 @@ fun CompressionSettingsSection(
                     .fillMaxWidth()
                     .testTag("bitrate_slider")
             )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Target File Size - back-solves a bitrate from a desired output size instead of
+            // making the user guess kbps. Uses the active video's real duration when known
+            // (falling back to a 30s assumption otherwise), and is capped by the same
+            // maxSelectableVideoBitrateKbps safety ceiling as every other bitrate entry point,
+            // so a size that's simply not achievable without growing the file gets the closest
+            // safe bitrate instead of silently ignoring the safety guarantee.
+            Text(
+                text = "Or Set a Target Output Size",
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = targetSizeMbInput,
+                    onValueChange = { targetSizeMbInput = it },
+                    label = { Text("Target size (MB)") },
+                    placeholder = { Text("e.g. 25") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.weight(1f).testTag("target_size_input")
+                )
+                Button(
+                    onClick = {
+                        val targetMb = targetSizeMbInput.toDoubleOrNull()
+                        val durationSec = ((activeVideoItem?.durationMs?.takeIf { it > 0 }) ?: 30_000L) / 1000.0
+                        if (targetMb != null && targetMb > 0.0) {
+                            val targetBytes = targetMb * 1024.0 * 1024.0
+                            val audioKbps = if (settings.removeAudio) 0 else 128
+                            val totalKbps = (targetBytes * 8.0 / 1000.0 / durationSec).toInt()
+                            val requestedVideoKbps = (totalKbps - audioKbps).coerceAtLeast(150)
+                            val cappedKbps = maxSelectableBitrateKbps?.let { requestedVideoKbps.coerceAtMost(it) } ?: requestedVideoKbps
+                            onSettingsChanged(settings.copy(bitrate = BitratePreset.CUSTOM, customBitrateKbps = cappedKbps))
+                        }
+                    },
+                    enabled = (targetSizeMbInput.toDoubleOrNull() ?: 0.0) > 0.0,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = SkyBlue60, contentColor = MaterialTheme.colorScheme.onPrimary),
+                    modifier = Modifier.testTag("apply_target_size_button")
+                ) {
+                    Text("Apply")
+                }
+            }
+            if (activeVideoItem == null) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Uses a 30s estimate until a video is queued; re-applying after queuing one will be more accurate.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
             Spacer(modifier = Modifier.height(12.dp))
 
