@@ -149,6 +149,33 @@ class CompressionEngine private constructor(private val appContext: Context) {
                     removeAudio = false,
                     resourceModeName = ResourceMode.SPEED.name,
                     isSystemPreset = true
+                ),
+                PresetEntity(
+                    presetName = "WhatsApp / Messaging (Small & Fast)",
+                    resolutionName = ResolutionPreset.RES_480P.name,
+                    bitrateKbps = 700,
+                    formatName = OutputFormat.MP4.name,
+                    removeAudio = false,
+                    resourceModeName = ResourceMode.SPEED.name,
+                    isSystemPreset = true
+                ),
+                PresetEntity(
+                    presetName = "Instagram / TikTok / Reels (1080p)",
+                    resolutionName = ResolutionPreset.RES_1080P.name,
+                    bitrateKbps = 3500,
+                    formatName = OutputFormat.MP4.name,
+                    removeAudio = false,
+                    resourceModeName = ResourceMode.BALANCED.name,
+                    isSystemPreset = true
+                ),
+                PresetEntity(
+                    presetName = "YouTube Upload (High Quality)",
+                    resolutionName = ResolutionPreset.RES_1080P.name,
+                    bitrateKbps = 8000,
+                    formatName = OutputFormat.MP4.name,
+                    removeAudio = false,
+                    resourceModeName = ResourceMode.SPEED.name,
+                    isSystemPreset = true
                 )
             )
             defaultPresets.forEach { presetDao.insertPreset(it) }
