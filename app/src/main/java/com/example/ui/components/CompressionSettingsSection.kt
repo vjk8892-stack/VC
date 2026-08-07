@@ -462,6 +462,34 @@ fun CompressionSettingsSection(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            // Trim - keyed to the active (first queued) video's real duration, same as the
+            // native-bitrate display above. Always visible here (not just inside per-item
+            // settings) so it sits next to the other output controls instead of being hidden
+            // behind a separate screen.
+            if (activeVideoItem != null && activeVideoItem.durationMs > 0L) {
+                TrimRangeControl(
+                    durationMs = activeVideoItem.durationMs,
+                    trimStartMs = settings.trimStartMs,
+                    trimEndMs = settings.trimEndMs,
+                    onTrimChanged = { start, end -> onSettingsChanged(settings.copy(trimStartMs = start, trimEndMs = end)) },
+                    headingStyle = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                )
+            } else {
+                Text(
+                    text = "Trim",
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Add a video to the queue to trim it before compressing.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             // Target File Size - back-solves a bitrate from a desired output size instead of
             // making the user guess kbps. Uses the active video's real duration when known
             // (falling back to a 30s assumption otherwise), and is capped by the same

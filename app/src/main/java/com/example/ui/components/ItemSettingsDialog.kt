@@ -37,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -156,43 +157,15 @@ fun ItemSettingsDialog(
                     colors = SliderDefaults.colors(thumbColor = SkyBlue60, activeTrackColor = SkyBlue60)
                 )
 
-                // Trim - only offered once this file's real duration is known; trim range is
-                // inherently per-video, so this lives here rather than in the global settings.
+                // Only offered once this file's real duration is known.
                 if (item.durationMs > 0L) {
                     Spacer(modifier = Modifier.height(12.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Trim", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
-                        if (tempSettings.trimStartMs > 0L || tempSettings.trimEndMs != null) {
-                            TextButton(onClick = { tempSettings = tempSettings.copy(trimStartMs = 0L, trimEndMs = null) }) {
-                                Text("Reset", style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
-                    }
-                    val trimEndMs = tempSettings.trimEndMs ?: item.durationMs
-                    Text(
-                        text = "%.1fs - %.1fs of %.1fs".format(
-                            tempSettings.trimStartMs / 1000.0, trimEndMs / 1000.0, item.durationMs / 1000.0
-                        ),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    RangeSlider(
-                        value = tempSettings.trimStartMs.toFloat()..trimEndMs.toFloat(),
-                        onValueChange = { range ->
-                            val start = range.start.toLong().coerceIn(0L, item.durationMs)
-                            val end = range.endInclusive.toLong().coerceIn(start, item.durationMs)
-                            tempSettings = tempSettings.copy(
-                                trimStartMs = start,
-                                trimEndMs = end.takeIf { it < item.durationMs }
-                            )
-                        },
-                        valueRange = 0f..item.durationMs.toFloat(),
-                        colors = SliderDefaults.colors(thumbColor = SkyBlue60, activeTrackColor = SkyBlue60),
-                        modifier = Modifier.testTag("trim_range_slider")
+                    TrimRangeControl(
+                        durationMs = item.durationMs,
+                        trimStartMs = tempSettings.trimStartMs,
+                        trimEndMs = tempSettings.trimEndMs,
+                        onTrimChanged = { start, end -> tempSettings = tempSettings.copy(trimStartMs = start, trimEndMs = end) },
+                        headingStyle = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
                     )
                 }
 
@@ -242,4 +215,49 @@ fun ItemSettingsDialog(
             }
         }
     )
+}
+
+/** Shared by the global Compressor Studio screen and the per-item settings dialog, so trim has
+ * one implementation instead of drifting into two. Caller must only render this once a real
+ * duration is known (durationMs > 0) - a zero-length range isn't a meaningful slider. */
+@Composable
+fun TrimRangeControl(
+    durationMs: Long,
+    trimStartMs: Long,
+    trimEndMs: Long?,
+    onTrimChanged: (startMs: Long, endMs: Long?) -> Unit,
+    headingStyle: TextStyle,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Trim", style = headingStyle)
+            if (trimStartMs > 0L || trimEndMs != null) {
+                TextButton(onClick = { onTrimChanged(0L, null) }) {
+                    Text("Reset", style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+        val effectiveEndMs = trimEndMs ?: durationMs
+        Text(
+            text = "%.1fs - %.1fs of %.1fs".format(trimStartMs / 1000.0, effectiveEndMs / 1000.0, durationMs / 1000.0),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        RangeSlider(
+            value = trimStartMs.toFloat()..effectiveEndMs.toFloat(),
+            onValueChange = { range ->
+                val start = range.start.toLong().coerceIn(0L, durationMs)
+                val end = range.endInclusive.toLong().coerceIn(start, durationMs)
+                onTrimChanged(start, end.takeIf { it < durationMs })
+            },
+            valueRange = 0f..durationMs.toFloat(),
+            colors = SliderDefaults.colors(thumbColor = SkyBlue60, activeTrackColor = SkyBlue60),
+            modifier = Modifier.fillMaxWidth().testTag("trim_range_slider")
+        )
+    }
 }
