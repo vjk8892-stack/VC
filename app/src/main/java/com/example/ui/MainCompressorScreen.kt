@@ -199,7 +199,8 @@ fun MainCompressorScreen(
                     0 -> { // Studio Tab (Input + Compression Settings + Hardware Allocation)
                         InputSourceSection(
                             onAddLocalVideos = { viewModel.addLocalVideoUris(it) },
-                            onAddUrlSource = { viewModel.addUrlSource(it) }
+                            onAddUrlSource = { viewModel.addUrlSource(it) },
+                            queueItems = queue
                         )
 
                         CompressionSettingsSection(

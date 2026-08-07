@@ -3,7 +3,6 @@ package com.example.ui.components
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,7 +23,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Code
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.VideoLibrary
@@ -36,9 +34,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.SecondaryTabRow
-import androidx.compose.material3.Tab
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -55,14 +51,20 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.VideoQueueItem
+import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.SkyBlue60
 
 @Composable
 fun InputSourceSection(
     onAddLocalVideos: (List<Uri>) -> Unit,
     onAddUrlSource: (String) -> Unit,
+    queueItems: List<VideoQueueItem> = emptyList(),
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -142,41 +144,117 @@ fun InputSourceSection(
 
             when (selectedTab) {
                 0 -> {
-                    // Local File Dropzone / Picker Box
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .border(
-                                width = 1.5.dp,
-                                color = SkyBlue60.copy(alpha = 0.5f),
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                            .clickable { filePickerLauncher.launch("video/*") }
-                            .padding(24.dp)
-                            .testTag("upload_video_area"),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                imageVector = Icons.Default.Movie,
-                                contentDescription = "Browse Videos",
-                                tint = SkyBlue60,
-                                modifier = Modifier.size(40.dp)
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
+                    if (queueItems.isEmpty()) {
+                        // Local File Dropzone / Picker Box
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .border(
+                                    width = 1.5.dp,
+                                    color = SkyBlue60.copy(alpha = 0.5f),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                                .clickable { filePickerLauncher.launch("video/*") }
+                                .padding(24.dp)
+                                .testTag("upload_video_area"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(
+                                    imageVector = Icons.Default.Movie,
+                                    contentDescription = "Browse Videos",
+                                    tint = SkyBlue60,
+                                    modifier = Modifier.size(40.dp)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "Tap to Select Videos from Gallery or Files",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Supports MP4, MOV, MKV, AVI, WebM, FLV (Multi-file batch enabled)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    } else {
+                        // Files already selected: show what's queued instead of repeating the
+                        // same static "tap to select" prompt, with a clear way to add more.
+                        Column {
                             Text(
-                                text = "Tap to Select Videos from Gallery or Files",
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                text = "${queueItems.size} video${if (queueItems.size == 1) "" else "s"} selected",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Supports MP4, MOV, MKV, AVI, WebM, FLV (Multi-file batch enabled)",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                items(queueItems, key = { it.id }) { item ->
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .width(140.dp)
+                                                .padding(10.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Movie,
+                                                contentDescription = null,
+                                                tint = SkyBlue60,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Column {
+                                                Text(
+                                                    text = item.title,
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = formatBytes(item.originalSizeBytes),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                item {
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = SkyBlue60.copy(alpha = 0.15f),
+                                        modifier = Modifier
+                                            .clickable { filePickerLauncher.launch("video/*") }
+                                            .testTag("add_more_videos_button")
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .height(52.dp)
+                                                .padding(horizontal = 14.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Add,
+                                                contentDescription = "Add more videos",
+                                                tint = SkyBlue60,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Add more", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = SkyBlue60)
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -260,79 +338,55 @@ fun InputSourceSection(
                 }
 
                 2 -> {
-                    // YouTube URL Input
+                    // YouTube downloading needs a real extractor this app doesn't have yet
+                    // (see UrlVideoDownloader) - show that plainly instead of a fully
+                    // interactive flow that can only ever fail.
                     Column {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = AmberWarning.copy(alpha = 0.15f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = AmberWarning,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "YouTube downloads aren't supported yet. Use a direct video URL or a local file instead.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
                         OutlinedTextField(
                             value = urlText,
                             onValueChange = { urlText = it },
+                            enabled = false,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("youtube_url_input"),
                             label = { Text("YouTube Video Link") },
-                            placeholder = { Text("https://www.youtube.com/watch?v=dQw4w9WgXcQ") },
+                            placeholder = { Text("Not available yet") },
                             leadingIcon = {
                                 Icon(
                                     imageVector = Icons.Default.OndemandVideo,
                                     contentDescription = null,
-                                    tint = Color.Red
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             },
                             singleLine = true,
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                            keyboardActions = KeyboardActions(onDone = {
-                                if (urlText.isNotBlank()) {
-                                    onAddUrlSource(urlText)
-                                    urlText = ""
-                                }
-                            }),
                             shape = RoundedCornerShape(12.dp)
                         )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            TextButton(
-                                onClick = {
-                                    urlText = "https://www.youtube.com/watch?v=L_LUpnjgPso"
-                                }
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Code,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Insert Sample YouTube Link", style = MaterialTheme.typography.labelSmall)
-                            }
-
-                            Button(
-                                onClick = {
-                                    if (urlText.isNotBlank()) {
-                                        onAddUrlSource(urlText)
-                                        urlText = ""
-                                    }
-                                },
-                                enabled = urlText.isNotBlank(),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = SkyBlue60,
-                                    contentColor = MaterialTheme.colorScheme.onPrimary
-                                ),
-                                modifier = Modifier.testTag("fetch_youtube_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Download,
-                                    contentDescription = "Fetch YT",
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Fetch YT & Queue")
-                            }
-                        }
                     }
                 }
             }
