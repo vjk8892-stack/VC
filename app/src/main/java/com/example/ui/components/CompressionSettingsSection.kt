@@ -244,7 +244,96 @@ fun CompressionSettingsSection(
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Trim - always visible (not behind Advanced Settings): this and Target Size below
+            // are outcome-oriented controls people open this app specifically to use, not
+            // implementation details like codec/exact-resolution. Reads and writes the active
+            // (first queued) video's OWN trim range, never the shared global settings - a trim
+            // window is only meaningful against one specific video's duration, so it must not
+            // propagate to other queued files.
+            if (activeVideoItem != null && activeVideoItem.durationMs > 0L) {
+                TrimRangeControl(
+                    durationMs = activeVideoItem.durationMs,
+                    trimStartMs = activeVideoItem.settings.trimStartMs,
+                    trimEndMs = activeVideoItem.settings.trimEndMs,
+                    onTrimChanged = { start, end -> onItemTrimChanged(activeVideoItem.id, start, end) },
+                    headingStyle = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                )
+                Text(
+                    text = "Applies to \"${activeVideoItem.title}\" only. Trim other queued videos from their own settings in the Batch Queue.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                Text(
+                    text = "Trim",
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Add a video to the queue to trim it before compressing.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Target File Size - back-solves a bitrate from a desired output size instead of
+            // making the user guess kbps. Uses the active video's real duration when known
+            // (falling back to a 30s assumption otherwise), and is capped by the same
+            // maxSelectableVideoBitrateKbps safety ceiling as every other bitrate entry point,
+            // so a size that's simply not achievable without growing the file gets the closest
+            // safe bitrate instead of silently ignoring the safety guarantee.
+            Text(
+                text = "Or Set a Target Output Size",
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = targetSizeMbInput,
+                    onValueChange = { targetSizeMbInput = it },
+                    label = { Text("Target size (MB)") },
+                    placeholder = { Text("e.g. 25") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.weight(1f).testTag("target_size_input")
+                )
+                Button(
+                    onClick = {
+                        val targetMb = targetSizeMbInput.toDoubleOrNull()
+                        if (targetMb != null && targetMb > 0.0) {
+                            val targetBytes = (targetMb * 1024.0 * 1024.0).toLong()
+                            val requestedKbps = presetBasisItem.bitrateForTargetSizeBytes(targetBytes)
+                            onSettingsChanged(settings.copy(bitrate = BitratePreset.CUSTOM, customBitrateKbps = requestedKbps))
+                        }
+                    },
+                    enabled = (targetSizeMbInput.toDoubleOrNull() ?: 0.0) > 0.0,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = SkyBlue60, contentColor = MaterialTheme.colorScheme.onPrimary),
+                    modifier = Modifier.testTag("apply_target_size_button")
+                ) {
+                    Text("Apply")
+                }
+            }
+            if (activeVideoItem == null) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Uses a 30s estimate until a video is queued; re-applying after queuing one will be more accurate.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Advanced Settings Disclosure
             Row(
@@ -256,7 +345,7 @@ fun CompressionSettingsSection(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Advanced Settings (codec, resolution, bitrate, audio)",
+                    text = "Advanced Settings (codec, exact resolution, manual bitrate)",
                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -467,93 +556,6 @@ fun CompressionSettingsSection(
             )
 
             Spacer(modifier = Modifier.height(16.dp))
-
-            // Trim - reads and writes the active (first queued) video's OWN trim range, never
-            // the shared global settings: a trim window is only meaningful against one specific
-            // video's duration, so it must not propagate to other queued files the way the rest
-            // of these controls do.
-            if (activeVideoItem != null && activeVideoItem.durationMs > 0L) {
-                TrimRangeControl(
-                    durationMs = activeVideoItem.durationMs,
-                    trimStartMs = activeVideoItem.settings.trimStartMs,
-                    trimEndMs = activeVideoItem.settings.trimEndMs,
-                    onTrimChanged = { start, end -> onItemTrimChanged(activeVideoItem.id, start, end) },
-                    headingStyle = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
-                )
-                Text(
-                    text = "Applies to \"${activeVideoItem.title}\" only. Trim other queued videos from their own settings in the Batch Queue.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                Text(
-                    text = "Trim",
-                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Add a video to the queue to trim it before compressing.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Target File Size - back-solves a bitrate from a desired output size instead of
-            // making the user guess kbps. Uses the active video's real duration when known
-            // (falling back to a 30s assumption otherwise), and is capped by the same
-            // maxSelectableVideoBitrateKbps safety ceiling as every other bitrate entry point,
-            // so a size that's simply not achievable without growing the file gets the closest
-            // safe bitrate instead of silently ignoring the safety guarantee.
-            Text(
-                text = "Or Set a Target Output Size",
-                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                OutlinedTextField(
-                    value = targetSizeMbInput,
-                    onValueChange = { targetSizeMbInput = it },
-                    label = { Text("Target size (MB)") },
-                    placeholder = { Text("e.g. 25") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true,
-                    modifier = Modifier.weight(1f).testTag("target_size_input")
-                )
-                Button(
-                    onClick = {
-                        val targetMb = targetSizeMbInput.toDoubleOrNull()
-                        if (targetMb != null && targetMb > 0.0) {
-                            val targetBytes = (targetMb * 1024.0 * 1024.0).toLong()
-                            val requestedKbps = presetBasisItem.bitrateForTargetSizeBytes(targetBytes)
-                            onSettingsChanged(settings.copy(bitrate = BitratePreset.CUSTOM, customBitrateKbps = requestedKbps))
-                        }
-                    },
-                    enabled = (targetSizeMbInput.toDoubleOrNull() ?: 0.0) > 0.0,
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = SkyBlue60, contentColor = MaterialTheme.colorScheme.onPrimary),
-                    modifier = Modifier.testTag("apply_target_size_button")
-                ) {
-                    Text("Apply")
-                }
-            }
-            if (activeVideoItem == null) {
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = "Uses a 30s estimate until a video is queued; re-applying after queuing one will be more accurate.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
 
             // Format Selection & Audio Toggle
             Row(
