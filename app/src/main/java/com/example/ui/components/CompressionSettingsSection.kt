@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MusicOff
@@ -37,6 +38,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
@@ -90,6 +92,7 @@ fun CompressionSettingsSection(
     var presetNameInput by remember { mutableStateOf("") }
     var advancedExpanded by remember { mutableStateOf(false) }
     var targetSizeMbInput by remember { mutableStateOf("") }
+    var showBitrateInfo by remember { mutableStateOf(false) }
 
     // Calculate dynamic estimated size using single source of truth model. Trim lives on the
     // item (never in global settings), so fold the active item's own trim back into the
@@ -487,11 +490,24 @@ fun CompressionSettingsSection(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "Video Bitrate Target",
-                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Video Bitrate Target",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    // What this number means (native-bitrate ceiling, real-hardware undershoot) is
+                    // genuinely useful but was two permanent paragraphs sitting in the primary
+                    // flow - most people just want the slider. Now opt-in via this toggle.
+                    IconButton(onClick = { showBitrateInfo = !showBitrateInfo }, modifier = Modifier.testTag("bitrate_info_toggle")) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = if (showBitrateInfo) "Hide bitrate details" else "What does this mean?",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
                 Text(
                     text = "${settings.customBitrateKbps} kbps (${(settings.customBitrateKbps / 1000.0).let { "%.1f".format(it) }} Mbps)",
                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
@@ -499,20 +515,22 @@ fun CompressionSettingsSection(
                 )
             }
 
-            if (nativeBitrateKbps != null && activeVideoItem != null) {
+            if (showBitrateInfo) {
+                if (nativeBitrateKbps != null && activeVideoItem != null) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Native bitrate of \"${activeVideoItem.title}\": %.1f Mbps - max selectable is capped below this so compression always actually saves space".format(nativeBitrateKbps / 1000.0),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "Native bitrate of \"${activeVideoItem.title}\": %.1f Mbps - max selectable is capped below this so compression always actually saves space".format(nativeBitrateKbps / 1000.0),
+                    text = "This is the target sent to the encoder - real hardware commonly lands ~10-15% under it, which the size preview below already accounts for.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = "This is the target sent to the encoder - real hardware commonly lands ~10-15% under it, which the size preview below already accounts for.",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
 
             Spacer(modifier = Modifier.height(6.dp))
 

@@ -20,14 +20,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.ListAlt
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
-import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -60,6 +63,8 @@ import com.example.ui.components.HistoryLogsSection
 import com.example.ui.components.InputSourceSection
 import com.example.ui.components.ItemSettingsDialog
 import com.example.ui.components.ResourceControlsSection
+import com.example.ui.theme.AmberWarning
+import com.example.ui.theme.RoseError
 import com.example.ui.theme.SkyBlue60
 import kotlinx.coroutines.flow.collectLatest
 
@@ -106,21 +111,74 @@ fun MainCompressorScreen(
                 onToggleSound = { viewModel.toggleSoundNotification() }
             )
         },
-        floatingActionButton = {
-            if (queue.isNotEmpty() && !isBatchRunning) {
-                ExtendedFloatingActionButton(
-                    onClick = {
-                        viewModel.startBatchProcessing()
-                        // Jump to the Batch Queue tab so the user immediately sees progress
-                        // bars/status instead of wondering whether the tap registered.
-                        selectedTab = 1
-                    },
-                    icon = { Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null) },
-                    text = { Text("Compress Batch (${queue.size})") },
-                    containerColor = SkyBlue60,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.testTag("fab_start_batch")
-                )
+        // One persistent action surface for Start/Pause/Resume/Cancel, reachable from every tab -
+        // replaces both the old floating action button (which only ever knew "start") and the
+        // Batch Queue tab's own button row, which duplicated it. Two controls for the same
+        // action left it unclear which one was "the" button; this is now the only one.
+        bottomBar = {
+            if (queue.isNotEmpty()) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 3.dp,
+                    shadowElevation = 8.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (!isBatchRunning) {
+                            Button(
+                                onClick = {
+                                    viewModel.startBatchProcessing()
+                                    // Jump to the Batch Queue tab so the user immediately sees
+                                    // progress bars/status instead of wondering if the tap registered.
+                                    selectedTab = 1
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("start_batch_button"),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = SkyBlue60,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                ),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Compress ${queue.size} Video${if (queue.size == 1) "" else "s"}")
+                            }
+                        } else {
+                            Button(
+                                onClick = { if (isBatchPaused) viewModel.resumeBatch() else viewModel.pauseBatch() },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("pause_resume_batch_button"),
+                                colors = ButtonDefaults.buttonColors(containerColor = AmberWarning),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isBatchPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                                    contentDescription = null
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(if (isBatchPaused) "Resume Batch" else "Pause Batch")
+                            }
+                            Button(
+                                onClick = { viewModel.cancelBatch() },
+                                modifier = Modifier.testTag("cancel_batch_button"),
+                                colors = ButtonDefaults.buttonColors(containerColor = RoseError),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.Cancel, contentDescription = null)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Cancel")
+                            }
+                        }
+                    }
+                }
             }
         },
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
@@ -223,10 +281,16 @@ fun MainCompressorScreen(
                             onItemTrimChanged = { itemId, start, end -> viewModel.updateItemTrim(itemId, start, end) }
                         )
 
-                        ResourceControlsSection(
-                            settings = globalSettings,
-                            onSettingsChanged = { viewModel.updateGlobalSettings { _ -> it } }
-                        )
+                        // Pacing between files only means anything once there IS a "between" -
+                        // showing it at equal weight to the compression controls with 0-1 videos
+                        // queued gave a niche, do-nothing-yet setting the same prominence as the
+                        // controls that define the output.
+                        if (queue.size >= 2) {
+                            ResourceControlsSection(
+                                settings = globalSettings,
+                                onSettingsChanged = { viewModel.updateGlobalSettings { _ -> it } }
+                            )
+                        }
 
                         if (queue.isNotEmpty()) {
                             BatchQueueSummaryCard(
@@ -239,11 +303,6 @@ fun MainCompressorScreen(
                     1 -> { // Queue Tab
                         BatchQueueSection(
                             queue = queue,
-                            isBatchRunning = isBatchRunning,
-                            isBatchPaused = isBatchPaused,
-                            onStartBatch = { viewModel.startBatchProcessing() },
-                            onPauseBatch = { viewModel.pauseBatch() },
-                            onCancelBatch = { viewModel.cancelBatch() },
                             onClearQueue = { viewModel.clearQueue() },
                             onRemoveItem = { viewModel.removeItem(it) },
                             onReorderQueue = { from, to -> viewModel.reorderQueue(from, to) },

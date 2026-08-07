@@ -92,7 +92,7 @@ fun HeaderBar(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Pro Desktop Encoding Suite",
+                            text = "On-device video compression",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

@@ -29,6 +29,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -55,6 +59,10 @@ fun HistoryLogsSection(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    var showClearConfirm by remember { mutableStateOf(false) }
+    // A single pending-id (not per-item remember inside the forEach below) so the confirm state
+    // can't end up attached to the wrong row if the list changes while a dialog is open.
+    var pendingDeleteId by remember { mutableStateOf<String?>(null) }
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -86,7 +94,7 @@ fun HistoryLogsSection(
 
                 if (historyList.isNotEmpty()) {
                     OutlinedButton(
-                        onClick = onClearAllHistory,
+                        onClick = { showClearConfirm = true },
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier.testTag("clear_history_button")
                     ) {
@@ -159,11 +167,11 @@ fun HistoryLogsSection(
                                         )
                                     }
 
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                                         if (item.isSuccessful && item.outputPath != null) {
                                             IconButton(
                                                 onClick = { onPlayVideo?.invoke(item.outputPath, item.title) },
-                                                modifier = Modifier.size(40.dp).testTag("play_history_${item.id}")
+                                                modifier = Modifier.size(48.dp).testTag("play_history_${item.id}")
                                             ) {
                                                 Icon(
                                                     imageVector = Icons.Default.PlayArrow,
@@ -185,7 +193,7 @@ fun HistoryLogsSection(
                                                         context.startActivity(Intent.createChooser(shareIntent, "Share Compressed Video"))
                                                     } catch (_: Exception) {}
                                                 },
-                                                modifier = Modifier.size(40.dp)
+                                                modifier = Modifier.size(48.dp)
                                             ) {
                                                 Icon(
                                                     imageVector = Icons.Default.Share,
@@ -197,8 +205,8 @@ fun HistoryLogsSection(
                                         }
 
                                         IconButton(
-                                            onClick = { onDeleteHistoryItem(item.id) },
-                                            modifier = Modifier.size(40.dp)
+                                            onClick = { pendingDeleteId = item.id },
+                                            modifier = Modifier.size(48.dp)
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.Delete,
@@ -251,6 +259,28 @@ fun HistoryLogsSection(
                     }
                 }
             }
+        }
+    }
+
+    if (showClearConfirm) {
+        ConfirmDialog(
+            title = "Clear all history?",
+            message = "Removes all ${historyList.size} log entries. The compressed video files themselves are not deleted.",
+            confirmLabel = "Clear History",
+            onConfirm = onClearAllHistory,
+            onDismiss = { showClearConfirm = false }
+        )
+    }
+    pendingDeleteId?.let { id ->
+        val pendingItem = historyList.find { it.id == id }
+        if (pendingItem != null) {
+            ConfirmDialog(
+                title = "Delete this log entry?",
+                message = "Removes \"${pendingItem.title}\" from History. The compressed video file itself is not deleted.",
+                confirmLabel = "Delete",
+                onConfirm = { onDeleteHistoryItem(id) },
+                onDismiss = { pendingDeleteId = null }
+            )
         }
     }
 }
