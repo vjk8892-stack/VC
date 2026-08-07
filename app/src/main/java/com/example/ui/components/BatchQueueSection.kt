@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Cancel
@@ -96,7 +97,7 @@ fun BatchQueueSection(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "4. Compression Batch Queue (${queue.size})",
+                        text = "Compression Batch Queue (${queue.size})",
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -218,6 +219,60 @@ fun BatchQueueSection(
     }
 }
 
+/** Compact summary shown on the Studio tab so the full queue isn't duplicated there;
+ * tapping it jumps to the dedicated Batch Queue tab. */
+@Composable
+fun BatchQueueSummaryCard(
+    queue: List<VideoQueueItem>,
+    onViewQueue: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val completedCount = queue.count { it.status == CompressionItemState.COMPLETED }
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 2.dp,
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable { onViewQueue() }
+            .testTag("batch_queue_summary_card")
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.ListAlt,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text(
+                        text = "${queue.size} video${if (queue.size == 1) "" else "s"} in queue",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "$completedCount completed - tap to view batch queue",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                contentDescription = "View Batch Queue",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+    }
+}
+
 @Composable
 fun QueueItemCard(
     item: VideoQueueItem,
@@ -290,50 +345,50 @@ fun QueueItemCard(
                     if (item.status == CompressionItemState.COMPLETED && item.outputPath != null) {
                         IconButton(
                             onClick = { onPlayVideo?.invoke(item.outputPath, item.title) },
-                            modifier = Modifier.size(28.dp).testTag("play_queue_${item.id}")
+                            modifier = Modifier.size(40.dp).testTag("play_queue_${item.id}")
                         ) {
                             Icon(
                                 imageVector = Icons.Default.PlayArrow,
                                 contentDescription = "Play Compressed Video",
                                 tint = SkyBlue60,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(22.dp)
                             )
                         }
                     }
-                    IconButton(onClick = onOpenSettings, modifier = Modifier.size(28.dp)) {
+                    IconButton(onClick = onOpenSettings, modifier = Modifier.size(40.dp)) {
                         Icon(
                             imageVector = Icons.Default.Tune,
                             contentDescription = "Customize Settings",
                             tint = SkyBlue60,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                     if (index > 0) {
-                        IconButton(onClick = onMoveUp, modifier = Modifier.size(28.dp)) {
+                        IconButton(onClick = onMoveUp, modifier = Modifier.size(40.dp)) {
                             Icon(
                                 imageVector = Icons.Default.ArrowUpward,
                                 contentDescription = "Move Up",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
                     if (index < totalItems - 1) {
-                        IconButton(onClick = onMoveDown, modifier = Modifier.size(28.dp)) {
+                        IconButton(onClick = onMoveDown, modifier = Modifier.size(40.dp)) {
                             Icon(
                                 imageVector = Icons.Default.ArrowDownward,
                                 contentDescription = "Move Down",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
-                    IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
+                    IconButton(onClick = onRemove, modifier = Modifier.size(40.dp)) {
                         Icon(
                             imageVector = Icons.Default.Delete,
                             contentDescription = "Remove",
                             tint = RoseError,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }

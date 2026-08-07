@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.VideoQueueItem
 import com.example.ui.components.BatchQueueSection
+import com.example.ui.components.BatchQueueSummaryCard
 import com.example.ui.components.CompressionSettingsSection
 import com.example.ui.components.HeaderBar
 import com.example.ui.components.HistoryLogsSection
@@ -221,18 +222,9 @@ fun MainCompressorScreen(
                         )
 
                         if (queue.isNotEmpty()) {
-                            BatchQueueSection(
+                            BatchQueueSummaryCard(
                                 queue = queue,
-                                isBatchRunning = isBatchRunning,
-                                isBatchPaused = isBatchPaused,
-                                onStartBatch = { viewModel.startBatchProcessing() },
-                                onPauseBatch = { viewModel.pauseBatch() },
-                                onCancelBatch = { viewModel.cancelBatch() },
-                                onClearQueue = { viewModel.clearQueue() },
-                                onRemoveItem = { viewModel.removeItem(it) },
-                                onReorderQueue = { from, to -> viewModel.reorderQueue(from, to) },
-                                onOpenItemSettings = { editingItem = it },
-                                onPlayVideo = { path, title -> activeVideoPlayer = Pair(path, title) }
+                                onViewQueue = { selectedTab = 1 }
                             )
                         }
                     }

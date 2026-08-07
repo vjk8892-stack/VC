@@ -86,7 +86,7 @@ fun InputSourceSection(
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "1. Select Video Source",
+                text = "Select Video Source",
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                 color = MaterialTheme.colorScheme.primary
             )

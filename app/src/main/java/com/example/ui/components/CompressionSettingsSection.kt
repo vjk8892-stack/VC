@@ -20,6 +20,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MusicOff
@@ -84,6 +86,7 @@ fun CompressionSettingsSection(
 ) {
     var showSavePresetDialog by remember { mutableStateOf(false) }
     var presetNameInput by remember { mutableStateOf("") }
+    var advancedExpanded by remember { mutableStateOf(false) }
 
     // Calculate dynamic estimated size using single source of truth model
     val sampleItem = (activeVideoItem ?: VideoQueueItem(
@@ -122,25 +125,30 @@ fun CompressionSettingsSection(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "2. Compression Settings",
+                        text = "Compression Settings",
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
+            }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = if (useGlobalSettings) "Global Mode" else "Per-File Mode",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Switch(
-                        checked = useGlobalSettings,
-                        onCheckedChange = onToggleUseGlobalSettings,
-                        modifier = Modifier.testTag("global_mode_switch")
-                    )
-                }
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Apply settings to all files",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Switch(
+                    checked = useGlobalSettings,
+                    onCheckedChange = onToggleUseGlobalSettings,
+                    modifier = Modifier.testTag("global_mode_switch")
+                )
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -203,6 +211,30 @@ fun CompressionSettingsSection(
                 }
             }
 
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Advanced Settings Disclosure
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { advancedExpanded = !advancedExpanded }
+                    .testTag("advanced_settings_toggle"),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Advanced Settings (codec, resolution, bitrate, audio)",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Icon(
+                    imageVector = if (advancedExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (advancedExpanded) "Collapse" else "Expand",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            if (advancedExpanded) {
             Spacer(modifier = Modifier.height(16.dp))
 
             // Video Codec Selection (HEVC / H.265 / H.264 / VP9 / AV1)
@@ -435,6 +467,7 @@ fun CompressionSettingsSection(
                     )
                 }
             }
+            } // end advancedExpanded
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -452,7 +485,7 @@ fun CompressionSettingsSection(
                     ) {
                         Column {
                             Text(
-                                text = "Estimated Output Size",
+                                text = "Preview for next compression",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
