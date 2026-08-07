@@ -416,7 +416,10 @@ fun QueueItemCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     val etaText = when {
-                        item.etaSeconds <= 0L -> "Finishing up..."
+                        // -1 is the "no estimate yet" sentinel from the transcoder's monitor
+                        // loop (progress still under 2%) - the encode is starting, not ending.
+                        item.etaSeconds < 0L -> "Estimating..."
+                        item.etaSeconds == 0L -> "Finishing up..."
                         item.etaSeconds < 60L -> "${item.etaSeconds}s remaining"
                         else -> "${item.etaSeconds / 60}m ${item.etaSeconds % 60}s remaining"
                     }

@@ -219,7 +219,8 @@ fun MainCompressorScreen(
                             useGlobalSettings = useGlobalSettings,
                             onToggleUseGlobalSettings = { viewModel.toggleUseGlobalSettings(it) },
                             supportedCodecs = viewModel.supportedCodecs,
-                            activeVideoItem = queue.firstOrNull()
+                            activeVideoItem = queue.firstOrNull(),
+                            onItemTrimChanged = { itemId, start, end -> viewModel.updateItemTrim(itemId, start, end) }
                         )
 
                         ResourceControlsSection(

@@ -87,7 +87,9 @@ class CompressionEngine private constructor(private val appContext: Context) {
     private val _isDarkMode = MutableStateFlow(true)
     val isDarkMode: StateFlow<Boolean> = _isDarkMode.asStateFlow()
 
-    private val _snackMessages = MutableSharedFlow<String>()
+    // Buffered so emit() never suspends a work coroutine indefinitely when no UI is collecting
+    // (e.g. batch finishing while the app is backgrounded behind the foreground service).
+    private val _snackMessages = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val snackMessages: SharedFlow<String> = _snackMessages.asSharedFlow()
 
     // History and Presets from Room
@@ -120,7 +122,9 @@ class CompressionEngine private constructor(private val appContext: Context) {
 
     private fun seedInitialSystemPresets() {
         engineScope.launch(Dispatchers.IO) {
-            if (presetDao.countSystemPresets() > 0) return@launch
+            // Seed by name-diff, not by "any system preset exists": a count>0 guard would mean
+            // installs seeded under an older app version never receive presets added later.
+            val existingNames = presetDao.getSystemPresetNames().toSet()
 
             val defaultPresets = listOf(
                 PresetEntity(
@@ -178,7 +182,7 @@ class CompressionEngine private constructor(private val appContext: Context) {
                     isSystemPreset = true
                 )
             )
-            defaultPresets.forEach { presetDao.insertPreset(it) }
+            defaultPresets.filter { it.presetName !in existingNames }.forEach { presetDao.insertPreset(it) }
         }
     }
 
@@ -198,13 +202,34 @@ class CompressionEngine private constructor(private val appContext: Context) {
         _globalSettings.update { current ->
             val updated = updateBlock(current)
             // If global settings mode is active, sync settings to queued items that haven't
-            // been individually customized via the per-item dialog.
+            // been individually customized via the per-item dialog. Trim is deliberately NOT
+            // synced: a trim range is meaningful only against one specific video's duration,
+            // so each item always keeps its own - otherwise trimming the first video would
+            // silently clip every other queued video to the same window.
             if (_useGlobalSettings.value) {
                 _queue.update { list ->
-                    list.map { item -> if (item.id in customizedItemIds) item else item.copy(settings = updated) }
+                    list.map { item ->
+                        if (item.id in customizedItemIds) item
+                        else item.copy(settings = updated.copy(
+                            trimStartMs = item.settings.trimStartMs,
+                            trimEndMs = item.settings.trimEndMs
+                        ))
+                    }
                 }
             }
             updated
+        }
+    }
+
+    /** Sets one item's trim range without marking it "customized" - trim is inherently
+     * per-video, so using it must not detach the item from future global-settings sync the
+     * way the per-item settings dialog does. */
+    fun updateItemTrim(itemId: String, trimStartMs: Long, trimEndMs: Long?) {
+        _queue.update { list ->
+            list.map {
+                if (it.id == itemId) it.copy(settings = it.settings.copy(trimStartMs = trimStartMs, trimEndMs = trimEndMs))
+                else it
+            }
         }
     }
 
@@ -226,7 +251,8 @@ class CompressionEngine private constructor(private val appContext: Context) {
                     originalBitrateKbps = info.bitrateKbps,
                     originalFps = info.fps,
                     originalAudioBitrateKbps = info.audioBitrateKbps,
-                    settings = _globalSettings.value
+                    // Trim never carries over from global settings - it belongs to one video.
+                    settings = _globalSettings.value.copy(trimStartMs = 0L, trimEndMs = null)
                 )
             }
             _queue.update { current -> current + newItems }
@@ -249,7 +275,7 @@ class CompressionEngine private constructor(private val appContext: Context) {
                 sourcePathOrUrl = trimmed,
                 originalSizeBytes = if (isYt) 45_000_000L else 20_000_000L,
                 durationMs = 30_000L,
-                settings = _globalSettings.value
+                settings = _globalSettings.value.copy(trimStartMs = 0L, trimEndMs = null)
             )
             _queue.update { it + item }
             _snackMessages.emit("Added URL to queue: $title")
@@ -298,12 +324,17 @@ class CompressionEngine private constructor(private val appContext: Context) {
         ContextCompat.startForegroundService(appContext, Intent(appContext, CompressionForegroundService::class.java))
 
         batchJob = engineScope.launch(Dispatchers.IO) {
-            val queuedItems = _queue.value.filter {
-                it.status == CompressionItemState.QUEUED || it.status == CompressionItemState.PAUSED || it.status == CompressionItemState.FAILED
-            }
-
-            for ((index, item) in queuedItems.withIndex()) {
-                if (cancelledJobIds.contains(item.id)) continue
+            // Pull the next item from the live queue on each pass (not a snapshot taken at
+            // start) so videos added mid-batch are processed too, instead of sitting QUEUED
+            // while the batch declares itself complete. attemptedIds guarantees each item is
+            // tried at most once per run, so a FAILED item is retried once, not forever.
+            val attemptedIds = mutableSetOf<String>()
+            while (true) {
+                val item = _queue.value.firstOrNull {
+                    (it.status == CompressionItemState.QUEUED || it.status == CompressionItemState.PAUSED || it.status == CompressionItemState.FAILED) &&
+                        it.id !in attemptedIds && it.id !in cancelledJobIds
+                } ?: break
+                attemptedIds.add(item.id)
 
                 // A paused item keeps retrying (from the start; the encoder has no mid-export
                 // resume) until the user resumes or cancels, holding the whole batch here.
@@ -319,7 +350,7 @@ class CompressionEngine private constructor(private val appContext: Context) {
                 // Cool-down pacing between items per Resource Mode - a real effect (reduces
                 // sustained thermal/battery load in Low Resource Mode) rather than a setting
                 // that looked configurable but didn't change anything about the actual run.
-                if (index < queuedItems.lastIndex && !cancelledJobIds.contains(item.id)) {
+                if (!cancelledJobIds.contains(item.id)) {
                     val cooldownMs = item.settings.resourceMode.interItemCooldownMs
                     if (cooldownMs > 0L) delay(cooldownMs)
                 }
@@ -370,8 +401,15 @@ class CompressionEngine private constructor(private val appContext: Context) {
             currentSourcePath = downloadResult.getOrThrow().absolutePath
         }
 
-        // Step 2: Transcode / Compress
-        updateItemStatus(item.id, CompressionItemState.PROCESSING, progress = 0.35f)
+        // Step 2: Transcode / Compress. The 30%-for-download progress reservation only applies
+        // to items that actually downloaded - a local file's bar must start at ~0, not jump
+        // straight to 35% before any encoding work has happened.
+        val isRemote = item.sourceType == VideoSourceType.DIRECT_URL || item.sourceType == VideoSourceType.YOUTUBE
+        val progressBase = if (isRemote) 0.3f else 0f
+        val progressSpan = 1f - progressBase
+        updateItemInQueue(item.id) {
+            it.copy(status = CompressionItemState.PROCESSING, progress = progressBase + 0.02f, etaSeconds = -1L, encodingSpeedFps = 0f)
+        }
 
         var updatedItem = _queue.value.find { it.id == item.id }?.copy(sourcePathOrUrl = currentSourcePath) ?: item
 
@@ -394,7 +432,7 @@ class CompressionEngine private constructor(private val appContext: Context) {
         val result = transcoder.transcodeVideo(
             item = updatedItem,
             onProgress = { progress, currentFps, etaSec, bytesWritten ->
-                val totalProgress = 0.3f + (progress * 0.7f)
+                val totalProgress = progressBase + (progress * progressSpan)
                 updateItemInQueue(item.id) {
                     it.copy(
                         status = CompressionItemState.PROCESSING,

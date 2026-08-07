@@ -170,6 +170,11 @@ class VideoTranscoder(private val context: Context) {
                     isCancelled = isCancelled
                 )
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // Never convert cooperative cancellation into a FAILED result - rethrow so the
+            // batch job actually stops instead of marching on to mark the item failed.
+            if (outputFile.exists()) outputFile.delete()
+            throw e
         } catch (e: Exception) {
             if (outputFile.exists()) outputFile.delete()
             Result.failure(Exception("Compression failed: ${e.localizedMessage ?: e.javaClass.simpleName}"))
@@ -221,16 +226,25 @@ class VideoTranscoder(private val context: Context) {
             })
             .build()
 
-        // Media3's own clipping support - the decoder skips straight to trimStartMs and stops at
-        // trimEndMs, no separate pre-trim pass needed. Only built when a trim is actually set, so
-        // the untrimmed path is unchanged for every item that doesn't use it.
-        val mediaItem = if (settings.trimStartMs > 0L || settings.trimEndMs != null) {
+        // Media3's own clipping support - the decoder skips straight to the trim start and stops
+        // at the trim end, no separate pre-trim pass needed. The requested range is clamped to
+        // this item's real duration and dropped entirely when degenerate (start at/after end),
+        // exactly matching effectiveDurationMs()'s fallback - so the encoder can never be handed
+        // a window past the end of the file that the size/ETA math already refused to believe in.
+        val sourceDurationMs = item.durationMs
+        val requestedStartMs = settings.trimStartMs.coerceAtLeast(0L)
+        val requestedEndMs = settings.trimEndMs
+        val clampedStartMs = if (sourceDurationMs > 0L) requestedStartMs.coerceAtMost(sourceDurationMs) else requestedStartMs
+        val clampedEndMs = if (sourceDurationMs > 0L) (requestedEndMs ?: sourceDurationMs).coerceIn(clampedStartMs, sourceDurationMs) else requestedEndMs
+        val hasRealTrim = (clampedStartMs > 0L || requestedEndMs != null) &&
+            (clampedEndMs == null || clampedEndMs > clampedStartMs)
+        val mediaItem = if (hasRealTrim) {
             MediaItem.Builder()
                 .setUri(resolveMediaUri(item.sourcePathOrUrl))
                 .setClippingConfiguration(
                     MediaItem.ClippingConfiguration.Builder()
-                        .setStartPositionMs(settings.trimStartMs.coerceAtLeast(0L))
-                        .apply { settings.trimEndMs?.let { setEndPositionMs(it) } }
+                        .setStartPositionMs(clampedStartMs)
+                        .apply { clampedEndMs?.let { setEndPositionMs(it) } }
                         .build()
                 )
                 .build()
@@ -278,7 +292,17 @@ class VideoTranscoder(private val context: Context) {
             }
         }
 
-        val result = outcome.await()
+        // If this coroutine itself is cancelled (cancelBatch() cancels the whole batch job),
+        // await() unwinds without the monitor loop ever reaching its transformer.cancel() call -
+        // which would leave an orphaned export silently encoding to a file nobody tracks.
+        // We're on the Main dispatcher here, which is where Transformer requires its calls.
+        val result = try {
+            outcome.await()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            try { transformer.cancel() } catch (_: Exception) {}
+            if (outputFile.exists()) outputFile.delete()
+            throw e
+        }
         monitorJob.cancel()
 
         result.fold(

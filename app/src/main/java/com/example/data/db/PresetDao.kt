@@ -14,6 +14,9 @@ interface PresetDao {
     @Query("SELECT COUNT(*) FROM saved_presets WHERE isSystemPreset = 1")
     suspend fun countSystemPresets(): Int
 
+    @Query("SELECT presetName FROM saved_presets WHERE isSystemPreset = 1")
+    suspend fun getSystemPresetNames(): List<String>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPreset(preset: PresetEntity)
 

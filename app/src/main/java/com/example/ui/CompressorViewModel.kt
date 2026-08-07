@@ -51,6 +51,9 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
     fun updateItemSettings(itemId: String, settings: VideoCompressionSettings) =
         engine.updateItemSettings(itemId, settings)
 
+    fun updateItemTrim(itemId: String, trimStartMs: Long, trimEndMs: Long?) =
+        engine.updateItemTrim(itemId, trimStartMs, trimEndMs)
+
     fun removeItem(itemId: String) = engine.removeItem(itemId)
 
     fun reorderQueue(fromIndex: Int, toIndex: Int) = engine.reorderQueue(fromIndex, toIndex)

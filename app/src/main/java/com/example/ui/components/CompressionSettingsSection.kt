@@ -83,6 +83,7 @@ fun CompressionSettingsSection(
     onToggleUseGlobalSettings: (Boolean) -> Unit,
     supportedCodecs: Set<VideoCodec> = VideoCodec.entries.toSet(),
     activeVideoItem: VideoQueueItem? = null,
+    onItemTrimChanged: (itemId: String, trimStartMs: Long, trimEndMs: Long?) -> Unit = { _, _, _ -> },
     modifier: Modifier = Modifier
 ) {
     var showSavePresetDialog by remember { mutableStateOf(false) }
@@ -90,14 +91,19 @@ fun CompressionSettingsSection(
     var advancedExpanded by remember { mutableStateOf(false) }
     var targetSizeMbInput by remember { mutableStateOf("") }
 
-    // Calculate dynamic estimated size using single source of truth model
+    // Calculate dynamic estimated size using single source of truth model. Trim lives on the
+    // item (never in global settings), so fold the active item's own trim back into the
+    // settings used for the preview/target-size math - otherwise both would quietly ignore it.
+    val previewSettings = if (activeVideoItem != null) {
+        settings.copy(trimStartMs = activeVideoItem.settings.trimStartMs, trimEndMs = activeVideoItem.settings.trimEndMs)
+    } else settings
     val sampleItem = (activeVideoItem ?: VideoQueueItem(
         title = "Sample Video",
         sourceType = VideoSourceType.LOCAL_FILE,
         sourcePathOrUrl = "",
         originalSizeBytes = 50_000_000L,
         durationMs = 30_000L
-    )).copy(settings = settings)
+    )).copy(settings = previewSettings)
 
     // Only a real queued item has a trustworthy source bitrate to lock the slider to - the
     // fallback sampleItem above is a rough stand-in for the size preview only.
@@ -108,7 +114,7 @@ fun CompressionSettingsSection(
     // active item's cap when known, else the same flat fallback bitrateForPreset() uses.
     val presetBasisItem = (activeVideoItem ?: VideoQueueItem(
         title = "", sourceType = VideoSourceType.LOCAL_FILE, sourcePathOrUrl = ""
-    )).copy(settings = settings)
+    )).copy(settings = previewSettings)
 
     // customBitrateKbps is the single number used everywhere (display, slider, encoder) - keep
     // it in sync with whichever preset is selected so a shown value can never silently diverge
@@ -462,17 +468,22 @@ fun CompressionSettingsSection(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Trim - keyed to the active (first queued) video's real duration, same as the
-            // native-bitrate display above. Always visible here (not just inside per-item
-            // settings) so it sits next to the other output controls instead of being hidden
-            // behind a separate screen.
+            // Trim - reads and writes the active (first queued) video's OWN trim range, never
+            // the shared global settings: a trim window is only meaningful against one specific
+            // video's duration, so it must not propagate to other queued files the way the rest
+            // of these controls do.
             if (activeVideoItem != null && activeVideoItem.durationMs > 0L) {
                 TrimRangeControl(
                     durationMs = activeVideoItem.durationMs,
-                    trimStartMs = settings.trimStartMs,
-                    trimEndMs = settings.trimEndMs,
-                    onTrimChanged = { start, end -> onSettingsChanged(settings.copy(trimStartMs = start, trimEndMs = end)) },
+                    trimStartMs = activeVideoItem.settings.trimStartMs,
+                    trimEndMs = activeVideoItem.settings.trimEndMs,
+                    onTrimChanged = { start, end -> onItemTrimChanged(activeVideoItem.id, start, end) },
                     headingStyle = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                )
+                Text(
+                    text = "Applies to \"${activeVideoItem.title}\" only. Trim other queued videos from their own settings in the Batch Queue.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
                 Text(
