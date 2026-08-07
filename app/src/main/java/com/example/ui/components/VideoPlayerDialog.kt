@@ -1,7 +1,6 @@
 package com.example.ui.components
 
 import android.content.Intent
-import android.net.Uri
 import android.widget.MediaController
 import android.widget.VideoView
 import androidx.compose.foundation.background
@@ -45,9 +44,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
-import androidx.core.content.FileProvider
 import com.example.ui.theme.SkyBlue60
-import java.io.File
+import com.example.util.mediaFileExists
+import com.example.util.resolveMediaUri
 
 @Composable
 fun VideoPlayerDialog(
@@ -123,12 +122,11 @@ fun VideoPlayerDialog(
                         AndroidView(
                             factory = { ctx ->
                                 VideoView(ctx).apply {
-                                    val videoFile = File(filePath)
-                                    if (videoFile.exists()) {
+                                    if (mediaFileExists(ctx, filePath)) {
                                         val mediaController = MediaController(ctx)
                                         mediaController.setAnchorView(this)
                                         setMediaController(mediaController)
-                                        setVideoURI(Uri.fromFile(videoFile))
+                                        setVideoURI(resolveMediaUri(ctx, filePath))
                                         setOnPreparedListener { mp ->
                                             mp.isLooping = true
                                             start()
@@ -178,12 +176,7 @@ fun VideoPlayerDialog(
                     OutlinedButton(
                         onClick = {
                             try {
-                                val file = File(filePath)
-                                val uri = FileProvider.getUriForFile(
-                                    context,
-                                    "${context.packageName}.fileprovider",
-                                    file
-                                )
+                                val uri = resolveMediaUri(context, filePath)
                                 val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                     type = "video/*"
                                     putExtra(Intent.EXTRA_STREAM, uri)
@@ -203,12 +196,7 @@ fun VideoPlayerDialog(
                     OutlinedButton(
                         onClick = {
                             try {
-                                val file = File(filePath)
-                                val uri = FileProvider.getUriForFile(
-                                    context,
-                                    "${context.packageName}.fileprovider",
-                                    file
-                                )
+                                val uri = resolveMediaUri(context, filePath)
                                 val viewIntent = Intent(Intent.ACTION_VIEW).apply {
                                     setDataAndType(uri, "video/*")
                                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)

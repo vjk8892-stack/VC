@@ -20,16 +20,20 @@ import com.example.ui.theme.MyApplicationTheme
 
 class MainActivity : ComponentActivity() {
 
-    // The batch-progress notification (posted by CompressionForegroundService) needs this on
-    // API 33+. Denying it doesn't break compression - the foreground service still runs and
-    // protects the batch from being killed - it just won't show visible progress.
-    private val notificationPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    // Requests, on first launch, whichever of these the running OS version actually needs:
+    // POST_NOTIFICATIONS (API 33+, for the batch-progress notification) and/or
+    // WRITE_EXTERNAL_STORAGE (API 24-28, to publish a compressed file into the public Downloads
+    // folder - API 29+ uses MediaStore instead and needs no permission for it). Denying either
+    // doesn't break compression itself; it just degrades gracefully (no visible progress
+    // notification, or the compressed file stays in the app's private storage instead of
+    // Downloads) - see CompressionForegroundService and VideoTranscoder.publishToPublicStorage.
+    private val permissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        requestNotificationPermissionIfNeeded()
+        requestRuntimePermissionsIfNeeded()
         setContent {
             val compressorViewModel: CompressorViewModel = viewModel()
             val isDarkMode by compressorViewModel.isDarkMode.collectAsStateWithLifecycle()
@@ -43,11 +47,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    private fun requestRuntimePermissionsIfNeeded() {
+        val missing = buildList {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) {
+                add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+                ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
+            ) {
+                add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            }
+        }
+        if (missing.isNotEmpty()) {
+            permissionLauncher.launch(missing.toTypedArray())
         }
     }
 }

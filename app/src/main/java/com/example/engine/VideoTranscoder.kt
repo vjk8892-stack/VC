@@ -1,5 +1,6 @@
 package com.example.engine
 
+import android.content.ContentValues
 import android.content.Context
 import android.media.MediaCodecInfo
 import android.media.MediaCodecList
@@ -7,7 +8,9 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
+import android.provider.MediaStore
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
@@ -305,18 +308,78 @@ class VideoTranscoder(private val context: Context) {
         }
     }
 
+    // Encodes into this app's own private external storage - always writable on every API level,
+    // no permission needed - rather than straight into a public directory. Android 10+ blocks (or
+    // silently redirects) direct java.io.File writes into a public directory without the
+    // legacy-storage opt-out this app doesn't request, which used to make the encoder either fail
+    // outright or quietly save where the user could never find it. publishToPublicStorage() below
+    // relocates the finished file into the real public Downloads folder afterward.
     private fun buildOutputFile(item: VideoQueueItem): File {
-        val downloadsPublicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        val compressorSubDir = File(downloadsPublicDir, "CompressedVideos")
-        val outputDir = try {
-            if (!compressorSubDir.exists()) compressorSubDir.mkdirs()
-            if (compressorSubDir.canWrite()) compressorSubDir else context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
-        } catch (e: Exception) {
-            context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
-        }
-
+        val outputDir = context.getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: context.filesDir
         val sanitizedTitle = item.title.replace(Regex("[^a-zA-Z0-9._-]"), "_").take(25)
         val extension = item.settings.format.extension
         return File(outputDir, "Compressed_${sanitizedTitle}_${System.currentTimeMillis()}.$extension")
+    }
+
+    /** Moves a just-encoded private-storage file into the public Downloads collection so it's
+     * actually visible in the Files app / other apps, matching what the UI already promises.
+     * Returns the new location as a String: a content:// MediaStore Uri on API 29+ (a direct
+     * java.io.File write to a public directory is blocked there without the legacy-storage
+     * opt-out this app doesn't request), or a real file path on API 24-28 where direct public-
+     * directory writes still work with WRITE_EXTERNAL_STORAGE granted. Returns null if the
+     * publish step itself fails for any reason (e.g. that permission denied on API 24-28) - the
+     * caller should then keep pointing at the original private file, which still works for
+     * in-app playback/sharing, it just won't show up in the user's Downloads folder. */
+    fun publishToPublicStorage(privateFile: File, item: VideoQueueItem): String? {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                publishViaMediaStore(privateFile, privateFile.name, item.settings.format.mimeType)?.toString()
+            } else {
+                publishViaLegacyPublicFile(privateFile, privateFile.name)?.absolutePath
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun publishViaMediaStore(privateFile: File, displayName: String, mimeType: String): Uri? {
+        val resolver = context.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/CompressedVideos")
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        val itemUri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
+
+        val copied = try {
+            resolver.openOutputStream(itemUri)?.use { out ->
+                privateFile.inputStream().use { input -> input.copyTo(out) }
+            } != null
+        } catch (e: Exception) {
+            false
+        }
+
+        if (!copied) {
+            resolver.delete(itemUri, null, null)
+            return null
+        }
+
+        values.clear()
+        values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+        resolver.update(itemUri, values, null, null)
+
+        privateFile.delete()
+        return itemUri
+    }
+
+    private fun publishViaLegacyPublicFile(privateFile: File, displayName: String): File? {
+        val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val outDir = File(downloadsDir, "CompressedVideos")
+        if (!outDir.exists() && !outDir.mkdirs()) return null
+        val destFile = File(outDir, displayName)
+        privateFile.inputStream().use { input -> destFile.outputStream().use { out -> input.copyTo(out) } }
+        privateFile.delete()
+        return destFile
     }
 }

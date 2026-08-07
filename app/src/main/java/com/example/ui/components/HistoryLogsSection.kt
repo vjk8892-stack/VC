@@ -37,12 +37,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.FileProvider
 import com.example.data.db.HistoryEntity
 import com.example.ui.theme.EmeraldSuccess
 import com.example.ui.theme.RoseError
 import com.example.ui.theme.SkyBlue60
-import java.io.File
+import com.example.util.resolveMediaUri
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -171,12 +170,7 @@ fun HistoryLogsSection(
                                             IconButton(
                                                 onClick = {
                                                     try {
-                                                        val file = File(item.outputPath)
-                                                        val uri = FileProvider.getUriForFile(
-                                                            context,
-                                                            "${context.packageName}.fileprovider",
-                                                            file
-                                                        )
+                                                        val uri = resolveMediaUri(context, item.outputPath)
                                                         val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                                             type = "video/*"
                                                             putExtra(Intent.EXTRA_STREAM, uri)

@@ -176,7 +176,7 @@ fun InputSourceSection(
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "Supports MP4, MOV, MKV, AVI, WebM, FLV (Multi-file batch enabled)",
+                                    text = "Accepts MP4, MOV, MKV, AVI, WebM and more as input - output is always MP4 (Multi-file batch enabled)",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )

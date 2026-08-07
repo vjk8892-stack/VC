@@ -384,11 +384,16 @@ class CompressionEngine private constructor(private val appContext: Context) {
 
         if (result.isSuccess) {
             val outputFile = result.getOrThrow()
+            val compressedBytes = outputFile.length()
+            // Relocate out of private storage into the public Downloads collection so the file
+            // is actually where the UI says it is; fall back to the private path (still fully
+            // usable in-app) if that relocation itself fails for any reason.
+            val publishedPath = transcoder.publishToPublicStorage(outputFile, updatedItem) ?: outputFile.absolutePath
             val finalItem = updatedItem.copy(
                 status = CompressionItemState.COMPLETED,
                 progress = 1.0f,
-                compressedSizeBytes = outputFile.length(),
-                outputPath = outputFile.absolutePath
+                compressedSizeBytes = compressedBytes,
+                outputPath = publishedPath
             )
             updateItemInQueue(item.id) { finalItem }
             saveToHistory(finalItem)
