@@ -212,7 +212,7 @@ class VideoTranscoder(private val context: Context) {
 
         result.fold(
             onSuccess = {
-                onProgress(1.0f, item.originalFps.toFloat(), 0L, outputFile.length())
+                onProgress(1.0f, item.originalFps.toFloat(), 0L, stabilizedFileLength(outputFile))
                 Result.success(outputFile)
             },
             onFailure = { e ->
@@ -224,6 +224,20 @@ class VideoTranscoder(private val context: Context) {
                 Result.failure(if (e is TranscodePausedException || e is TranscodeCancelledException) e else Exception(message))
             }
         )
+    }
+
+    // MP4 muxers finalize trailing metadata (the moov atom) as their last write; File.length()
+    // read right at the completion callback can catch that mid-flush and under-report the true
+    // final size. Poll until two consecutive reads agree before trusting it.
+    private suspend fun stabilizedFileLength(file: File): Long {
+        var previous = file.length()
+        repeat(10) {
+            delay(150)
+            val current = file.length()
+            if (current == previous && current > 0L) return current
+            previous = current
+        }
+        return previous
     }
 
     private fun resolveMediaUri(sourcePathOrUrl: String): Uri {
