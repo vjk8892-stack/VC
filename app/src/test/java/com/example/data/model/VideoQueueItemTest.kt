@@ -26,6 +26,33 @@ class VideoQueueItemTest {
         settings = settings
     )
 
+    // --- effectiveDurationMs (trim) ---
+
+    @Test
+    fun `effectiveDurationMs is unchanged when no trim is set`() {
+        assertEquals(20_000L, item(durationMs = 20_000L).effectiveDurationMs())
+    }
+
+    @Test
+    fun `effectiveDurationMs reflects the trim range`() {
+        val settings = VideoCompressionSettings(trimStartMs = 2_000L, trimEndMs = 12_000L)
+        assertEquals(10_000L, item(durationMs = 20_000L, settings = settings).effectiveDurationMs())
+    }
+
+    @Test
+    fun `effectiveDurationMs falls back to full duration for a degenerate trim range`() {
+        // end at or before start must not produce a zero/negative duration downstream math
+        // (progress %, ETA, size estimate) can't handle.
+        val settings = VideoCompressionSettings(trimStartMs = 15_000L, trimEndMs = 10_000L)
+        assertEquals(20_000L, item(durationMs = 20_000L, settings = settings).effectiveDurationMs())
+    }
+
+    @Test
+    fun `effectiveDurationMs is unaffected by trim before the real duration is known`() {
+        val settings = VideoCompressionSettings(trimStartMs = 2_000L, trimEndMs = 5_000L)
+        assertEquals(0L, item(durationMs = 0L, settings = settings).effectiveDurationMs())
+    }
+
     // --- sourceBitrateKbps ---
 
     @Test

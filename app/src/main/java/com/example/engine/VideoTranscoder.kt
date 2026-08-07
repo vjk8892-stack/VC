@@ -153,7 +153,7 @@ class VideoTranscoder(private val context: Context) {
         val outputFile = buildOutputFile(item)
         val (targetWidth, targetHeight) = item.getEffectiveDimensions()
         val targetBitrateBps = (item.getEffectiveVideoBitrateKbps() * 1000).coerceAtLeast(100_000)
-        val totalDurationMs = if (item.durationMs > 0) item.durationMs else 15_000L
+        val totalDurationMs = if (item.effectiveDurationMs() > 0) item.effectiveDurationMs() else 15_000L
         val durationSec = (totalDurationMs / 1000.0).coerceAtLeast(1.0)
 
         return try {
@@ -221,7 +221,22 @@ class VideoTranscoder(private val context: Context) {
             })
             .build()
 
-        val mediaItem = MediaItem.fromUri(resolveMediaUri(item.sourcePathOrUrl))
+        // Media3's own clipping support - the decoder skips straight to trimStartMs and stops at
+        // trimEndMs, no separate pre-trim pass needed. Only built when a trim is actually set, so
+        // the untrimmed path is unchanged for every item that doesn't use it.
+        val mediaItem = if (settings.trimStartMs > 0L || settings.trimEndMs != null) {
+            MediaItem.Builder()
+                .setUri(resolveMediaUri(item.sourcePathOrUrl))
+                .setClippingConfiguration(
+                    MediaItem.ClippingConfiguration.Builder()
+                        .setStartPositionMs(settings.trimStartMs.coerceAtLeast(0L))
+                        .apply { settings.trimEndMs?.let { setEndPositionMs(it) } }
+                        .build()
+                )
+                .build()
+        } else {
+            MediaItem.fromUri(resolveMediaUri(item.sourcePathOrUrl))
+        }
         val videoEffects: List<Effect> = listOf(
             Presentation.createForWidthAndHeight(width, height, Presentation.LAYOUT_SCALE_TO_FIT)
         )

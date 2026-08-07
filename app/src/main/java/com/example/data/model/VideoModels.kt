@@ -74,7 +74,11 @@ data class VideoCompressionSettings(
     val customBitrateKbps: Int = 4000,
     val format: OutputFormat = OutputFormat.MP4,
     val removeAudio: Boolean = false,
-    val resourceMode: ResourceMode = ResourceMode.BALANCED
+    val resourceMode: ResourceMode = ResourceMode.BALANCED,
+    // Trim range applied before encoding via Media3's own MediaItem.ClippingConfiguration - no
+    // separate decode/re-encode pass needed. trimEndMs of null means "to the end of the source".
+    val trimStartMs: Long = 0L,
+    val trimEndMs: Long? = null
 )
 
 data class VideoQueueItem(
@@ -148,6 +152,18 @@ data class VideoQueueItem(
         return requestedKbps.coerceAtMost(maxKbps)
     }
 
+    /** Duration after the trim range is applied - what progress/ETA/size-estimate math should
+     * actually be based on, not the untrimmed source duration. Falls back to the full source
+     * duration if the trim range is degenerate (e.g. end at or before start) rather than
+     * producing a zero/negative duration downstream math can't handle. */
+    fun effectiveDurationMs(): Long {
+        if (durationMs <= 0L) return durationMs
+        val end = (settings.trimEndMs ?: durationMs).coerceIn(0L, durationMs)
+        val start = settings.trimStartMs.coerceIn(0L, durationMs)
+        val trimmed = end - start
+        return if (trimmed > 0L) trimmed else durationMs
+    }
+
     fun getEffectiveDimensions(): Pair<Int, Int> {
         // CUSTOM means the user typed an exact width/height: honor it as-is (just rounded to
         // even) instead of reinterpreting it through the source video's aspect ratio below.
@@ -197,7 +213,7 @@ data class VideoQueueItem(
      * running ~12% under the requested video bitrate, so a naive 1:1 estimate systematically
      * overstates the output size. */
     fun estimateCompressedSizeBytes(): Long {
-        val durationSec = if (durationMs > 0L) durationMs / 1000.0 else 30.0
+        val durationSec = if (effectiveDurationMs() > 0L) effectiveDurationMs() / 1000.0 else 30.0
         val audioKbps = if (settings.removeAudio) 0 else (originalAudioBitrateKbps ?: 128)
         val expectedVideoKbps = (getEffectiveVideoBitrateKbps() * REAL_WORLD_CBR_EFFICIENCY).toInt().coerceAtLeast(50)
         val totalBitrateKbps = expectedVideoKbps + audioKbps

@@ -20,6 +20,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
@@ -154,6 +155,46 @@ fun ItemSettingsDialog(
                     valueRange = 150f..sliderMaxKbps.toFloat(),
                     colors = SliderDefaults.colors(thumbColor = SkyBlue60, activeTrackColor = SkyBlue60)
                 )
+
+                // Trim - only offered once this file's real duration is known; trim range is
+                // inherently per-video, so this lives here rather than in the global settings.
+                if (item.durationMs > 0L) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Trim", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+                        if (tempSettings.trimStartMs > 0L || tempSettings.trimEndMs != null) {
+                            TextButton(onClick = { tempSettings = tempSettings.copy(trimStartMs = 0L, trimEndMs = null) }) {
+                                Text("Reset", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+                    val trimEndMs = tempSettings.trimEndMs ?: item.durationMs
+                    Text(
+                        text = "%.1fs - %.1fs of %.1fs".format(
+                            tempSettings.trimStartMs / 1000.0, trimEndMs / 1000.0, item.durationMs / 1000.0
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    RangeSlider(
+                        value = tempSettings.trimStartMs.toFloat()..trimEndMs.toFloat(),
+                        onValueChange = { range ->
+                            val start = range.start.toLong().coerceIn(0L, item.durationMs)
+                            val end = range.endInclusive.toLong().coerceIn(start, item.durationMs)
+                            tempSettings = tempSettings.copy(
+                                trimStartMs = start,
+                                trimEndMs = end.takeIf { it < item.durationMs }
+                            )
+                        },
+                        valueRange = 0f..item.durationMs.toFloat(),
+                        colors = SliderDefaults.colors(thumbColor = SkyBlue60, activeTrackColor = SkyBlue60),
+                        modifier = Modifier.testTag("trim_range_slider")
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(12.dp))
 

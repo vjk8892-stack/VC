@@ -525,7 +525,7 @@ class CompressionEngine private constructor(private val appContext: Context) {
             sourcePathOrUrl = item.sourcePathOrUrl,
             originalSizeBytes = item.originalSizeBytes,
             compressedSizeBytes = item.compressedSizeBytes,
-            durationMs = item.durationMs,
+            durationMs = item.effectiveDurationMs(),
             resolutionLabel = "${w}x${h}",
             bitrateKbps = item.getEffectiveVideoBitrateKbps(),
             format = item.settings.format.extension,
