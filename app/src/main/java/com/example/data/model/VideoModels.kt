@@ -19,11 +19,14 @@ enum class VideoCodec(val label: String, val mimeType: String, val description: 
     AV1("AV1", "video/av01", "Next-gen ultra compression")
 }
 
-enum class BitratePreset(val label: String, val targetBitrateKbps: Int) {
-    LOW("Low (Fast / Small size)", 1000),
-    MEDIUM("Medium (Balanced)", 2500),
-    HIGH("High (Best Quality)", 5000),
-    CUSTOM("Custom Bitrate", 0)
+// LOW/MEDIUM/HIGH are no longer fixed kbps numbers - they're fractions of a given video's own
+// real max selectable bitrate (max/3, max/2, max/1), computed via VideoQueueItem.bitrateForPreset()
+// so they stay meaningful regardless of what the source video's bitrate actually is.
+enum class BitratePreset(val label: String, val divisor: Int) {
+    LOW("Low (Smaller File)", 3),
+    MEDIUM("Medium (Balanced)", 2),
+    HIGH("High (Best Quality)", 1),
+    CUSTOM("Custom Bitrate", 1)
 }
 
 // Android's MediaMuxer (and Media3 Transformer, which is built on it) can only write
@@ -33,10 +36,13 @@ enum class OutputFormat(val extension: String, val codecName: String, val mimeTy
     MP4("mp4", "MP4 Container", "video/mp4")
 }
 
-enum class ResourceMode(val title: String, val description: String, val ramPercentage: Float) {
-    SPEED("Speed Mode", "Allocates max hardware resources for highest FPS encoding", 0.75f),
-    BALANCED("Balanced Mode", "Optimal resource allocation for multi-tasking", 0.50f),
-    LOW_RESOURCE("Low Resource Mode", "Eco power usage to prevent device heating", 0.25f)
+// interItemCooldownMs is a real, applied effect: startBatchProcessing() waits this long
+// between queued items, so higher modes genuinely reduce sustained thermal/battery load
+// during a batch instead of being a cosmetic-only setting.
+enum class ResourceMode(val title: String, val description: String, val interItemCooldownMs: Long) {
+    SPEED("Speed Mode", "No pause between queued files - fastest way through a batch", 0L),
+    BALANCED("Balanced Mode", "Short pause between files to ease sustained heat and battery use", 1_500L),
+    LOW_RESOURCE("Low Resource Mode", "Longer pause between files to keep the device cooler", 4_000L)
 }
 
 enum class VideoSourceType(val label: String) {
@@ -60,13 +66,19 @@ data class VideoCompressionSettings(
     val customHeight: Int = 720,
     val videoCodec: VideoCodec = VideoCodec.HEVC_H265,
     val bitrate: BitratePreset = BitratePreset.MEDIUM,
-    val customBitrateKbps: Int = 2000,
+    // customBitrateKbps is the single source of truth for the bitrate actually requested,
+    // whichever preset is selected - the UI keeps it in sync with the chosen preset's
+    // computed value (see VideoQueueItem.bitrateForPreset) so there is never a second,
+    // divergent number involved. 4000 matches what MEDIUM resolves to (8000/2) under
+    // bitrateForPreset()'s no-source-yet fallback, before a real video's own max is known.
+    val customBitrateKbps: Int = 4000,
     val format: OutputFormat = OutputFormat.MP4,
     val removeAudio: Boolean = false,
-    val cpuCores: Int = Runtime.getRuntime().availableProcessors().coerceIn(1, 16),
-    val gpuAcceleration: Boolean = true,
     val resourceMode: ResourceMode = ResourceMode.BALANCED,
-    val targetSizeBytes: Long? = null
+    // Trim range applied before encoding via Media3's own MediaItem.ClippingConfiguration - no
+    // separate decode/re-encode pass needed. trimEndMs of null means "to the end of the source".
+    val trimStartMs: Long = 0L,
+    val trimEndMs: Long? = null
 )
 
 data class VideoQueueItem(
@@ -80,6 +92,10 @@ data class VideoQueueItem(
     val originalHeight: Int = 1080,
     val originalBitrateKbps: Int = 8000,
     val originalFps: Int = 30,
+    // Read from the source audio track's own format (when available) instead of assumed - the
+    // encoder passes audio through unchanged when no audio effects are requested, so this is
+    // what the output will actually carry, not a guess.
+    val originalAudioBitrateKbps: Int? = null,
     val compressedSizeBytes: Long = 0L,
     val status: CompressionItemState = CompressionItemState.QUEUED,
     val progress: Float = 0f, // 0.0 to 1.0
@@ -89,12 +105,21 @@ data class VideoQueueItem(
     val outputPath: String? = null,
     val settings: VideoCompressionSettings = VideoCompressionSettings()
 ) {
-    fun getEffectiveBitrateKbps(): Int {
-        return if (settings.bitrate == BitratePreset.CUSTOM) {
-            settings.customBitrateKbps
-        } else {
-            settings.bitrate.targetBitrateKbps
-        }
+    /** The requested video bitrate before the source-derived safety cap is applied.
+     * customBitrateKbps is the single source of truth here regardless of which preset is
+     * selected - the UI keeps it in sync with the active preset's computed value, so there is
+     * never a second number that can silently diverge from what's shown on screen. */
+    fun getEffectiveBitrateKbps(): Int = settings.customBitrateKbps
+
+    /** What a given preset actually means for this specific video: LOW/MEDIUM/HIGH are max/3,
+     * max/2 and max/1 of this video's own real max selectable bitrate, not fixed numbers that
+     * would mean wildly different things for a 500kbps clip versus a 20Mbps one. Falls back to a
+     * flat assumption only when the source's real bitrate isn't known yet (e.g. a URL item
+     * before download). */
+    fun bitrateForPreset(preset: BitratePreset): Int {
+        val cap = maxSelectableVideoBitrateKbps() ?: 8000
+        if (preset == BitratePreset.CUSTOM) return cap
+        return (cap / preset.divisor).coerceAtLeast(150)
     }
 
     /** The source's own overall bitrate (video+audio+container), derived from real file size
@@ -106,15 +131,37 @@ data class VideoQueueItem(
         return kbps.toInt().coerceAtLeast(1)
     }
 
+    /** The real ceiling the Bitrate Target control should enforce: the most video bitrate that
+     * can be requested and still guarantee a smaller output than the source, derived from the
+     * source's own real average bitrate (sourceBitrateKbps), not container metadata. Null when
+     * the source's real bitrate isn't known yet (e.g. a URL item before download), in which case
+     * there's no honest number to cap the UI to. */
+    fun maxSelectableVideoBitrateKbps(): Int? {
+        val sourceKbps = sourceBitrateKbps() ?: return null
+        val audioKbps = if (settings.removeAudio) 0 else (originalAudioBitrateKbps ?: 128)
+        val safeTotalKbps = (sourceKbps * 0.85).toInt().coerceAtLeast(300)
+        return (safeTotalKbps - audioKbps).coerceAtLeast(150)
+    }
+
     /** The video bitrate actually used for encoding: the user's requested bitrate, capped so
      * the encoder is never asked to spend more bits/sec than the source already averages - a
      * request to "compress" a video must not legitimately produce a same-size-or-larger file. */
     fun getEffectiveVideoBitrateKbps(): Int {
         val requestedKbps = getEffectiveBitrateKbps()
-        val audioKbps = if (settings.removeAudio) 0 else 128
-        val sourceKbps = sourceBitrateKbps() ?: return requestedKbps
-        val safeTotalKbps = (sourceKbps * 0.85).toInt().coerceAtLeast(300)
-        return requestedKbps.coerceAtMost((safeTotalKbps - audioKbps).coerceAtLeast(150))
+        val maxKbps = maxSelectableVideoBitrateKbps() ?: return requestedKbps
+        return requestedKbps.coerceAtMost(maxKbps)
+    }
+
+    /** Duration after the trim range is applied - what progress/ETA/size-estimate math should
+     * actually be based on, not the untrimmed source duration. Falls back to the full source
+     * duration if the trim range is degenerate (e.g. end at or before start) rather than
+     * producing a zero/negative duration downstream math can't handle. */
+    fun effectiveDurationMs(): Long {
+        if (durationMs <= 0L) return durationMs
+        val end = (settings.trimEndMs ?: durationMs).coerceIn(0L, durationMs)
+        val start = settings.trimStartMs.coerceIn(0L, durationMs)
+        val trimmed = end - start
+        return if (trimmed > 0L) trimmed else durationMs
     }
 
     fun getEffectiveDimensions(): Pair<Int, Int> {
@@ -157,13 +204,47 @@ data class VideoQueueItem(
     }
 
     /** Mirrors the bitrate math the real encoder uses (getEffectiveVideoBitrateKbps), so this
-     * preview never promises savings the actual compression pass won't deliver. */
+     * preview never promises savings the actual compression pass won't deliver. Uses the
+     * source's real audio bitrate (when known) rather than a flat guess, since the encoder
+     * passes audio through unchanged - a wrong guess here was a real source of estimate vs
+     * actual-output drift. Also applies REAL_WORLD_CBR_EFFICIENCY to the video component: on
+     * real devices, requesting BITRATE_MODE_CBR from the hardware encoder is a target, not a
+     * guarantee - repeated real-device tests on this app consistently showed actual output
+     * running ~12% under the requested video bitrate, so a naive 1:1 estimate systematically
+     * overstates the output size. */
     fun estimateCompressedSizeBytes(): Long {
-        val durationSec = if (durationMs > 0L) durationMs / 1000.0 else 30.0
-        val audioKbps = if (settings.removeAudio) 0 else 128
-        val totalBitrateKbps = getEffectiveVideoBitrateKbps() + audioKbps
+        val durationSec = if (effectiveDurationMs() > 0L) effectiveDurationMs() / 1000.0 else 30.0
+        val audioKbps = if (settings.removeAudio) 0 else (originalAudioBitrateKbps ?: 128)
+        val expectedVideoKbps = (getEffectiveVideoBitrateKbps() * REAL_WORLD_CBR_EFFICIENCY).toInt().coerceAtLeast(50)
+        val totalBitrateKbps = expectedVideoKbps + audioKbps
 
         val estimatedBytes = (totalBitrateKbps * 1000L / 8.0 * durationSec).toLong()
         return estimatedBytes.coerceAtLeast(50_000L)
+    }
+
+    /** Back-solves the video bitrate to request in order to land close to targetBytes, given
+     * this item's own audio bitrate and (post-trim) duration. Compensates for the same
+     * REAL_WORLD_CBR_EFFICIENCY undershoot estimateCompressedSizeBytes() already accounts for -
+     * without it, a naive 1:1 solve would ask for a bitrate whose real (and previewed) output
+     * lands ~12% under the size the user actually typed in. Capped by
+     * maxSelectableVideoBitrateKbps() so a target that isn't achievable without growing the file
+     * gets the closest safe bitrate instead of silently exceeding that guarantee. */
+    fun bitrateForTargetSizeBytes(targetBytes: Long): Int {
+        val durationSec = if (effectiveDurationMs() > 0L) effectiveDurationMs() / 1000.0 else 30.0
+        val audioKbps = if (settings.removeAudio) 0 else (originalAudioBitrateKbps ?: 128)
+        val totalKbps = targetBytes * 8.0 / 1000.0 / durationSec
+        val idealVideoKbps = (totalKbps - audioKbps).coerceAtLeast(150.0)
+        val compensatedVideoKbps = (idealVideoKbps / REAL_WORLD_CBR_EFFICIENCY).toInt()
+        val cap = maxSelectableVideoBitrateKbps()
+        return if (cap != null) compensatedVideoKbps.coerceAtMost(cap) else compensatedVideoKbps
+    }
+
+    companion object {
+        // Derived from real-device measurements: two independent compression runs with CBR
+        // forced came in at ~89% and ~87% of the requested video bitrate. The encoder's actual
+        // target (getEffectiveVideoBitrateKbps) is left untouched - only the size preview (and
+        // the target-size back-solve above, which must agree with that preview) are corrected to
+        // reflect what hardware encoders on this device actually deliver.
+        private const val REAL_WORLD_CBR_EFFICIENCY = 0.88
     }
 }

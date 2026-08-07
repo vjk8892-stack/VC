@@ -20,6 +20,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MusicOff
@@ -35,6 +38,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
@@ -45,6 +49,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -61,7 +66,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.db.PresetEntity
 import com.example.data.model.BitratePreset
-import com.example.data.model.OutputFormat
 import com.example.data.model.ResolutionPreset
 import com.example.data.model.VideoCodec
 import com.example.data.model.VideoCompressionSettings
@@ -79,20 +83,55 @@ fun CompressionSettingsSection(
     onSaveCurrentPreset: (String) -> Unit,
     useGlobalSettings: Boolean,
     onToggleUseGlobalSettings: (Boolean) -> Unit,
+    supportedCodecs: Set<VideoCodec> = VideoCodec.entries.toSet(),
     activeVideoItem: VideoQueueItem? = null,
+    onItemTrimChanged: (itemId: String, trimStartMs: Long, trimEndMs: Long?) -> Unit = { _, _, _ -> },
     modifier: Modifier = Modifier
 ) {
     var showSavePresetDialog by remember { mutableStateOf(false) }
     var presetNameInput by remember { mutableStateOf("") }
+    var advancedExpanded by remember { mutableStateOf(false) }
+    var targetSizeMbInput by remember { mutableStateOf("") }
+    var showBitrateInfo by remember { mutableStateOf(false) }
 
-    // Calculate dynamic estimated size using single source of truth model
+    // Calculate dynamic estimated size using single source of truth model. Trim lives on the
+    // item (never in global settings), so fold the active item's own trim back into the
+    // settings used for the preview/target-size math - otherwise both would quietly ignore it.
+    val previewSettings = if (activeVideoItem != null) {
+        settings.copy(trimStartMs = activeVideoItem.settings.trimStartMs, trimEndMs = activeVideoItem.settings.trimEndMs)
+    } else settings
     val sampleItem = (activeVideoItem ?: VideoQueueItem(
         title = "Sample Video",
         sourceType = VideoSourceType.LOCAL_FILE,
         sourcePathOrUrl = "",
         originalSizeBytes = 50_000_000L,
         durationMs = 30_000L
-    )).copy(settings = settings)
+    )).copy(settings = previewSettings)
+
+    // Only a real queued item has a trustworthy source bitrate to lock the slider to - the
+    // fallback sampleItem above is a rough stand-in for the size preview only.
+    val nativeBitrateKbps = activeVideoItem?.copy(settings = settings)?.sourceBitrateKbps()
+    val maxSelectableBitrateKbps = activeVideoItem?.copy(settings = settings)?.maxSelectableVideoBitrateKbps()
+
+    // Basis for computing what LOW/MEDIUM/HIGH actually mean in kbps for this video: the real
+    // active item's cap when known, else the same flat fallback bitrateForPreset() uses.
+    val presetBasisItem = (activeVideoItem ?: VideoQueueItem(
+        title = "", sourceType = VideoSourceType.LOCAL_FILE, sourcePathOrUrl = ""
+    )).copy(settings = previewSettings)
+
+    // customBitrateKbps is the single number used everywhere (display, slider, encoder) - keep
+    // it in sync with whichever preset is selected so a shown value can never silently diverge
+    // from what actually gets requested.
+    LaunchedEffect(maxSelectableBitrateKbps, settings.bitrate) {
+        if (settings.bitrate != BitratePreset.CUSTOM) {
+            val computed = presetBasisItem.bitrateForPreset(settings.bitrate)
+            if (settings.customBitrateKbps != computed) {
+                onSettingsChanged(settings.copy(customBitrateKbps = computed))
+            }
+        } else if (maxSelectableBitrateKbps != null && settings.customBitrateKbps > maxSelectableBitrateKbps) {
+            onSettingsChanged(settings.copy(customBitrateKbps = maxSelectableBitrateKbps))
+        }
+    }
 
     val sampleOriginalBytes = if (sampleItem.originalSizeBytes > 0L) sampleItem.originalSizeBytes else 50_000_000L
     val estimatedOutputBytes = sampleItem.estimateCompressedSizeBytes()
@@ -122,25 +161,30 @@ fun CompressionSettingsSection(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "2. Compression Settings",
+                        text = "Compression Settings",
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
+            }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = if (useGlobalSettings) "Global Mode" else "Per-File Mode",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Switch(
-                        checked = useGlobalSettings,
-                        onCheckedChange = onToggleUseGlobalSettings,
-                        modifier = Modifier.testTag("global_mode_switch")
-                    )
-                }
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Apply settings to all files",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Switch(
+                    checked = useGlobalSettings,
+                    onCheckedChange = onToggleUseGlobalSettings,
+                    modifier = Modifier.testTag("global_mode_switch")
+                )
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -205,6 +249,119 @@ fun CompressionSettingsSection(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            // Trim - always visible (not behind Advanced Settings): this and Target Size below
+            // are outcome-oriented controls people open this app specifically to use, not
+            // implementation details like codec/exact-resolution. Reads and writes the active
+            // (first queued) video's OWN trim range, never the shared global settings - a trim
+            // window is only meaningful against one specific video's duration, so it must not
+            // propagate to other queued files.
+            if (activeVideoItem != null && activeVideoItem.durationMs > 0L) {
+                TrimRangeControl(
+                    durationMs = activeVideoItem.durationMs,
+                    trimStartMs = activeVideoItem.settings.trimStartMs,
+                    trimEndMs = activeVideoItem.settings.trimEndMs,
+                    onTrimChanged = { start, end -> onItemTrimChanged(activeVideoItem.id, start, end) },
+                    headingStyle = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                )
+                Text(
+                    text = "Applies to \"${activeVideoItem.title}\" only. Trim other queued videos from their own settings in the Batch Queue.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                Text(
+                    text = "Trim",
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Add a video to the queue to trim it before compressing.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Target File Size - back-solves a bitrate from a desired output size instead of
+            // making the user guess kbps. Uses the active video's real duration when known
+            // (falling back to a 30s assumption otherwise), and is capped by the same
+            // maxSelectableVideoBitrateKbps safety ceiling as every other bitrate entry point,
+            // so a size that's simply not achievable without growing the file gets the closest
+            // safe bitrate instead of silently ignoring the safety guarantee.
+            Text(
+                text = "Or Set a Target Output Size",
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = targetSizeMbInput,
+                    onValueChange = { targetSizeMbInput = it },
+                    label = { Text("Target size (MB)") },
+                    placeholder = { Text("e.g. 25") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.weight(1f).testTag("target_size_input")
+                )
+                Button(
+                    onClick = {
+                        val targetMb = targetSizeMbInput.toDoubleOrNull()
+                        if (targetMb != null && targetMb > 0.0) {
+                            val targetBytes = (targetMb * 1024.0 * 1024.0).toLong()
+                            val requestedKbps = presetBasisItem.bitrateForTargetSizeBytes(targetBytes)
+                            onSettingsChanged(settings.copy(bitrate = BitratePreset.CUSTOM, customBitrateKbps = requestedKbps))
+                        }
+                    },
+                    enabled = (targetSizeMbInput.toDoubleOrNull() ?: 0.0) > 0.0,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = SkyBlue60, contentColor = MaterialTheme.colorScheme.onPrimary),
+                    modifier = Modifier.testTag("apply_target_size_button")
+                ) {
+                    Text("Apply")
+                }
+            }
+            if (activeVideoItem == null) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Uses a 30s estimate until a video is queued; re-applying after queuing one will be more accurate.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Advanced Settings Disclosure
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { advancedExpanded = !advancedExpanded }
+                    .testTag("advanced_settings_toggle"),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Advanced Settings (codec, exact resolution, manual bitrate)",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Icon(
+                    imageVector = if (advancedExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (advancedExpanded) "Collapse" else "Expand",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            if (advancedExpanded) {
+            Spacer(modifier = Modifier.height(16.dp))
+
             // Video Codec Selection (HEVC / H.265 / H.264 / VP9 / AV1)
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -251,6 +408,14 @@ fun CompressionSettingsSection(
                         modifier = Modifier.testTag("codec_chip_${codec.name}")
                     )
                 }
+            }
+            if (settings.videoCodec !in supportedCodecs) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "No ${settings.videoCodec.label} encoder on this device - will fall back to a supported codec automatically.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -325,15 +490,45 @@ fun CompressionSettingsSection(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "Video Bitrate Target",
-                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Video Bitrate Target",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    // What this number means (native-bitrate ceiling, real-hardware undershoot) is
+                    // genuinely useful but was two permanent paragraphs sitting in the primary
+                    // flow - most people just want the slider. Now opt-in via this toggle.
+                    IconButton(onClick = { showBitrateInfo = !showBitrateInfo }, modifier = Modifier.testTag("bitrate_info_toggle")) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = if (showBitrateInfo) "Hide bitrate details" else "What does this mean?",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
                 Text(
                     text = "${settings.customBitrateKbps} kbps (${(settings.customBitrateKbps / 1000.0).let { "%.1f".format(it) }} Mbps)",
                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                     color = SkyBlue60
+                )
+            }
+
+            if (showBitrateInfo) {
+                if (nativeBitrateKbps != null && activeVideoItem != null) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Native bitrate of \"${activeVideoItem.title}\": %.1f Mbps - max selectable is capped below this so compression always actually saves space".format(nativeBitrateKbps / 1000.0),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "This is the target sent to the encoder - real hardware commonly lands ~10-15% under it, which the size preview below already accounts for.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
@@ -343,13 +538,16 @@ fun CompressionSettingsSection(
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(BitratePreset.entries) { preset ->
                     val isSelected = settings.bitrate == preset
+                    val previewKbps = presetBasisItem.bitrateForPreset(preset)
                     FilterChip(
                         selected = isSelected,
                         onClick = {
-                            val newKbps = if (preset != BitratePreset.CUSTOM) preset.targetBitrateKbps else settings.customBitrateKbps
-                            onSettingsChanged(settings.copy(bitrate = preset, customBitrateKbps = newKbps))
+                            onSettingsChanged(settings.copy(bitrate = preset, customBitrateKbps = previewKbps))
                         },
-                        label = { Text(preset.label, fontSize = 12.sp) },
+                        label = {
+                            val labelText = if (preset == BitratePreset.CUSTOM) preset.label else "${preset.label} (~$previewKbps kbps)"
+                            Text(labelText, fontSize = 12.sp)
+                        },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = SkyBlue60,
                             selectedLabelColor = MaterialTheme.colorScheme.onPrimary
@@ -358,13 +556,14 @@ fun CompressionSettingsSection(
                 }
             }
 
-            // Bitrate Slider
+            // Bitrate Slider - capped to this video's real max selectable bitrate once known
+            val sliderMaxKbps = (maxSelectableBitrateKbps ?: 15000).coerceAtLeast(300)
             Slider(
-                value = settings.customBitrateKbps.toFloat(),
+                value = settings.customBitrateKbps.toFloat().coerceAtMost(sliderMaxKbps.toFloat()),
                 onValueChange = {
                     onSettingsChanged(settings.copy(bitrate = BitratePreset.CUSTOM, customBitrateKbps = it.toInt()))
                 },
-                valueRange = 300f..15000f,
+                valueRange = 150f..sliderMaxKbps.toFloat(),
                 colors = SliderDefaults.colors(
                     thumbColor = SkyBlue60,
                     activeTrackColor = SkyBlue60
@@ -374,7 +573,7 @@ fun CompressionSettingsSection(
                     .testTag("bitrate_slider")
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Format Selection & Audio Toggle
             Row(
@@ -383,29 +582,24 @@ fun CompressionSettingsSection(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Output Container Format",
+                        text = "Output Format",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(6.dp))
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        items(OutputFormat.entries) { fmt ->
-                            val isSelected = settings.format == fmt
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (isSelected) SkyBlue60 else MaterialTheme.colorScheme.surfaceVariant,
-                                modifier = Modifier.clickable { onSettingsChanged(settings.copy(format = fmt)) }
-                            ) {
-                                Text(
-                                    text = fmt.extension.uppercase(),
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                    ),
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                )
-                            }
-                        }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Movie,
+                            contentDescription = null,
+                            tint = SkyBlue60,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "MP4 (H.264/HEVC compatible everywhere)",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                     }
                 }
 
@@ -432,6 +626,7 @@ fun CompressionSettingsSection(
                     )
                 }
             }
+            } // end advancedExpanded
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -449,7 +644,7 @@ fun CompressionSettingsSection(
                     ) {
                         Column {
                             Text(
-                                text = "Estimated Output Size",
+                                text = "Preview for next compression",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

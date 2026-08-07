@@ -29,6 +29,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -37,12 +41,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.FileProvider
 import com.example.data.db.HistoryEntity
 import com.example.ui.theme.EmeraldSuccess
 import com.example.ui.theme.RoseError
 import com.example.ui.theme.SkyBlue60
-import java.io.File
+import com.example.util.resolveMediaUri
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -56,6 +59,10 @@ fun HistoryLogsSection(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    var showClearConfirm by remember { mutableStateOf(false) }
+    // A single pending-id (not per-item remember inside the forEach below) so the confirm state
+    // can't end up attached to the wrong row if the list changes while a dialog is open.
+    var pendingDeleteId by remember { mutableStateOf<String?>(null) }
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -87,13 +94,19 @@ fun HistoryLogsSection(
 
                 if (historyList.isNotEmpty()) {
                     OutlinedButton(
-                        onClick = onClearAllHistory,
+                        onClick = { showClearConfirm = true },
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier.testTag("clear_history_button")
                     ) {
                         Text("Clear History", style = MaterialTheme.typography.labelSmall)
                     }
                 }
+            }
+
+            val successfulItems = historyList.filter { it.isSuccessful && it.compressedSizeBytes > 0 }
+            if (successfulItems.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                HistoryStatsRow(successfulItems)
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -154,29 +167,24 @@ fun HistoryLogsSection(
                                         )
                                     }
 
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                                         if (item.isSuccessful && item.outputPath != null) {
                                             IconButton(
                                                 onClick = { onPlayVideo?.invoke(item.outputPath, item.title) },
-                                                modifier = Modifier.size(28.dp).testTag("play_history_${item.id}")
+                                                modifier = Modifier.size(48.dp).testTag("play_history_${item.id}")
                                             ) {
                                                 Icon(
                                                     imageVector = Icons.Default.PlayArrow,
                                                     contentDescription = "Play Video",
                                                     tint = SkyBlue60,
-                                                    modifier = Modifier.size(18.dp)
+                                                    modifier = Modifier.size(22.dp)
                                                 )
                                             }
 
                                             IconButton(
                                                 onClick = {
                                                     try {
-                                                        val file = File(item.outputPath)
-                                                        val uri = FileProvider.getUriForFile(
-                                                            context,
-                                                            "${context.packageName}.fileprovider",
-                                                            file
-                                                        )
+                                                        val uri = resolveMediaUri(context, item.outputPath)
                                                         val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                                             type = "video/*"
                                                             putExtra(Intent.EXTRA_STREAM, uri)
@@ -185,26 +193,26 @@ fun HistoryLogsSection(
                                                         context.startActivity(Intent.createChooser(shareIntent, "Share Compressed Video"))
                                                     } catch (_: Exception) {}
                                                 },
-                                                modifier = Modifier.size(28.dp)
+                                                modifier = Modifier.size(48.dp)
                                             ) {
                                                 Icon(
                                                     imageVector = Icons.Default.Share,
                                                     contentDescription = "Share",
                                                     tint = SkyBlue60,
-                                                    modifier = Modifier.size(16.dp)
+                                                    modifier = Modifier.size(20.dp)
                                                 )
                                             }
                                         }
 
                                         IconButton(
-                                            onClick = { onDeleteHistoryItem(item.id) },
-                                            modifier = Modifier.size(28.dp)
+                                            onClick = { pendingDeleteId = item.id },
+                                            modifier = Modifier.size(48.dp)
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.Delete,
                                                 contentDescription = "Delete Log",
                                                 tint = RoseError,
-                                                modifier = Modifier.size(16.dp)
+                                                modifier = Modifier.size(20.dp)
                                             )
                                         }
                                     }
@@ -253,9 +261,72 @@ fun HistoryLogsSection(
             }
         }
     }
+
+    if (showClearConfirm) {
+        ConfirmDialog(
+            title = "Clear all history?",
+            message = "Removes all ${historyList.size} log entries. The compressed video files themselves are not deleted.",
+            confirmLabel = "Clear History",
+            onConfirm = onClearAllHistory,
+            onDismiss = { showClearConfirm = false }
+        )
+    }
+    pendingDeleteId?.let { id ->
+        val pendingItem = historyList.find { it.id == id }
+        if (pendingItem != null) {
+            ConfirmDialog(
+                title = "Delete this log entry?",
+                message = "Removes \"${pendingItem.title}\" from History. The compressed video file itself is not deleted.",
+                confirmLabel = "Delete",
+                onConfirm = { onDeleteHistoryItem(id) },
+                onDismiss = { pendingDeleteId = null }
+            )
+        }
+    }
 }
 
 fun formatTimestamp(timeMs: Long): String {
     val sdf = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
     return sdf.format(Date(timeMs))
+}
+
+/** Aggregate "what has this app actually saved you" summary - a cheap, high-visibility stat
+ * built entirely from data already recorded per compression, encouraging return use. */
+@Composable
+private fun HistoryStatsRow(successfulItems: List<HistoryEntity>, modifier: Modifier = Modifier) {
+    val totalOriginal = successfulItems.sumOf { it.originalSizeBytes }
+    val totalCompressed = successfulItems.sumOf { it.compressedSizeBytes }
+    val totalSaved = (totalOriginal - totalCompressed).coerceAtLeast(0L)
+    val avgSavingsPercent = calculateSavingsPercent(totalOriginal, totalCompressed)
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = EmeraldSuccess.copy(alpha = 0.12f),
+        modifier = modifier.fillMaxWidth().testTag("history_stats_row")
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            StatChip(value = formatBytes(totalSaved), label = "Total Saved")
+            StatChip(value = "$avgSavingsPercent%", label = "Avg Savings")
+            StatChip(value = "${successfulItems.size}", label = "Videos Compressed")
+        }
+    }
+}
+
+@Composable
+private fun StatChip(value: String, label: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            color = EmeraldSuccess
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
 }

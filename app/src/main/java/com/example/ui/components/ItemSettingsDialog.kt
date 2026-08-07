@@ -1,6 +1,5 @@
 package com.example.ui.components
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,7 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MusicOff
@@ -22,14 +20,15 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,11 +37,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.BitratePreset
-import com.example.data.model.OutputFormat
 import com.example.data.model.ResolutionPreset
 import com.example.data.model.VideoCodec
 import com.example.data.model.VideoQueueItem
@@ -53,9 +52,27 @@ import com.example.ui.theme.SkyBlue60
 fun ItemSettingsDialog(
     item: VideoQueueItem,
     onDismiss: () -> Unit,
-    onSaveSettings: (VideoQueueItem) -> Unit
+    onSaveSettings: (VideoQueueItem) -> Unit,
+    supportedCodecs: Set<VideoCodec> = VideoCodec.entries.toSet()
 ) {
     var tempSettings by remember { mutableStateOf(item.settings) }
+
+    val nativeBitrateKbps = item.sourceBitrateKbps()
+    val basisItem = item.copy(settings = tempSettings)
+    val maxSelectableBitrateKbps = basisItem.maxSelectableVideoBitrateKbps()
+
+    // Keep customBitrateKbps - the single number used for display, slider and encoding - in
+    // sync with this specific file's own cap, same as the global Compression Settings screen.
+    LaunchedEffect(maxSelectableBitrateKbps, tempSettings.bitrate) {
+        if (tempSettings.bitrate != BitratePreset.CUSTOM) {
+            val computed = basisItem.bitrateForPreset(tempSettings.bitrate)
+            if (tempSettings.customBitrateKbps != computed) {
+                tempSettings = tempSettings.copy(customBitrateKbps = computed)
+            }
+        } else if (maxSelectableBitrateKbps != null && tempSettings.customBitrateKbps > maxSelectableBitrateKbps) {
+            tempSettings = tempSettings.copy(customBitrateKbps = maxSelectableBitrateKbps)
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -83,6 +100,14 @@ fun ItemSettingsDialog(
                             )
                         )
                     }
+                }
+                if (tempSettings.videoCodec !in supportedCodecs) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "No ${tempSettings.videoCodec.label} encoder on this device - will fall back automatically.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -116,12 +141,33 @@ fun ItemSettingsDialog(
                     Text("${tempSettings.customBitrateKbps} kbps", style = MaterialTheme.typography.labelMedium, color = SkyBlue60)
                 }
 
+                if (nativeBitrateKbps != null) {
+                    Text(
+                        text = "Native bitrate: %.1f Mbps - max selectable is capped below this".format(nativeBitrateKbps / 1000.0),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                val sliderMaxKbps = (maxSelectableBitrateKbps ?: 12000).coerceAtLeast(300)
                 Slider(
-                    value = tempSettings.customBitrateKbps.toFloat(),
+                    value = tempSettings.customBitrateKbps.toFloat().coerceAtMost(sliderMaxKbps.toFloat()),
                     onValueChange = { tempSettings = tempSettings.copy(bitrate = BitratePreset.CUSTOM, customBitrateKbps = it.toInt()) },
-                    valueRange = 300f..12000f,
+                    valueRange = 150f..sliderMaxKbps.toFloat(),
                     colors = SliderDefaults.colors(thumbColor = SkyBlue60, activeTrackColor = SkyBlue60)
                 )
+
+                // Only offered once this file's real duration is known.
+                if (item.durationMs > 0L) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    TrimRangeControl(
+                        durationMs = item.durationMs,
+                        trimStartMs = tempSettings.trimStartMs,
+                        trimEndMs = tempSettings.trimEndMs,
+                        onTrimChanged = { start, end -> tempSettings = tempSettings.copy(trimStartMs = start, trimEndMs = end) },
+                        headingStyle = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(12.dp))
 
@@ -134,23 +180,11 @@ fun ItemSettingsDialog(
                     Column {
                         Text("Output Format", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
                         Spacer(modifier = Modifier.height(4.dp))
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            items(OutputFormat.entries) { fmt ->
-                                val isSelected = tempSettings.format == fmt
-                                Surface(
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = if (isSelected) SkyBlue60 else MaterialTheme.colorScheme.surfaceVariant,
-                                    modifier = Modifier.clickable { tempSettings = tempSettings.copy(format = fmt) }
-                                ) {
-                                    Text(
-                                        text = fmt.extension.uppercase(),
-                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                        color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    )
-                                }
-                            }
-                        }
+                        Text(
+                            text = "MP4",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = SkyBlue60
+                        )
                     }
 
                     Column(horizontalAlignment = Alignment.End) {
@@ -181,4 +215,49 @@ fun ItemSettingsDialog(
             }
         }
     )
+}
+
+/** Shared by the global Compressor Studio screen and the per-item settings dialog, so trim has
+ * one implementation instead of drifting into two. Caller must only render this once a real
+ * duration is known (durationMs > 0) - a zero-length range isn't a meaningful slider. */
+@Composable
+fun TrimRangeControl(
+    durationMs: Long,
+    trimStartMs: Long,
+    trimEndMs: Long?,
+    onTrimChanged: (startMs: Long, endMs: Long?) -> Unit,
+    headingStyle: TextStyle,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Trim", style = headingStyle)
+            if (trimStartMs > 0L || trimEndMs != null) {
+                TextButton(onClick = { onTrimChanged(0L, null) }) {
+                    Text("Reset", style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+        val effectiveEndMs = trimEndMs ?: durationMs
+        Text(
+            text = "%.1fs - %.1fs of %.1fs".format(trimStartMs / 1000.0, effectiveEndMs / 1000.0, durationMs / 1000.0),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        RangeSlider(
+            value = trimStartMs.toFloat()..effectiveEndMs.toFloat(),
+            onValueChange = { range ->
+                val start = range.start.toLong().coerceIn(0L, durationMs)
+                val end = range.endInclusive.toLong().coerceIn(start, durationMs)
+                onTrimChanged(start, end.takeIf { it < durationMs })
+            },
+            valueRange = 0f..durationMs.toFloat(),
+            colors = SliderDefaults.colors(thumbColor = SkyBlue60, activeTrackColor = SkyBlue60),
+            modifier = Modifier.fillMaxWidth().testTag("trim_range_slider")
+        )
+    }
 }
