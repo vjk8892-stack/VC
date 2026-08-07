@@ -158,13 +158,13 @@ fun HistoryLogsSection(
                                         if (item.isSuccessful && item.outputPath != null) {
                                             IconButton(
                                                 onClick = { onPlayVideo?.invoke(item.outputPath, item.title) },
-                                                modifier = Modifier.size(28.dp).testTag("play_history_${item.id}")
+                                                modifier = Modifier.size(40.dp).testTag("play_history_${item.id}")
                                             ) {
                                                 Icon(
                                                     imageVector = Icons.Default.PlayArrow,
                                                     contentDescription = "Play Video",
                                                     tint = SkyBlue60,
-                                                    modifier = Modifier.size(18.dp)
+                                                    modifier = Modifier.size(22.dp)
                                                 )
                                             }
 
@@ -185,26 +185,26 @@ fun HistoryLogsSection(
                                                         context.startActivity(Intent.createChooser(shareIntent, "Share Compressed Video"))
                                                     } catch (_: Exception) {}
                                                 },
-                                                modifier = Modifier.size(28.dp)
+                                                modifier = Modifier.size(40.dp)
                                             ) {
                                                 Icon(
                                                     imageVector = Icons.Default.Share,
                                                     contentDescription = "Share",
                                                     tint = SkyBlue60,
-                                                    modifier = Modifier.size(16.dp)
+                                                    modifier = Modifier.size(20.dp)
                                                 )
                                             }
                                         }
 
                                         IconButton(
                                             onClick = { onDeleteHistoryItem(item.id) },
-                                            modifier = Modifier.size(28.dp)
+                                            modifier = Modifier.size(40.dp)
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.Delete,
                                                 contentDescription = "Delete Log",
                                                 tint = RoseError,
-                                                modifier = Modifier.size(16.dp)
+                                                modifier = Modifier.size(20.dp)
                                             )
                                         }
                                     }

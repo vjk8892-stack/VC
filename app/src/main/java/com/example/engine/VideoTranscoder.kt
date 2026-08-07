@@ -1,7 +1,10 @@
 package com.example.engine
 
 import android.content.Context
+import android.media.MediaCodecInfo
 import android.media.MediaCodecList
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Environment
@@ -19,6 +22,7 @@ import androidx.media3.transformer.ProgressHolder
 import androidx.media3.transformer.TransformationRequest
 import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.VideoEncoderSettings
+import com.example.data.model.VideoCodec
 import com.example.data.model.VideoQueueItem
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -29,8 +33,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-class TranscodePausedException : Exception("Compression paused by user")
-class TranscodeCancelledException : Exception("Compression cancelled by user")
+class TranscodePausedException : Exception("Paused by user")
+class TranscodeCancelledException : Exception("Cancelled by user")
 
 class VideoTranscoder(private val context: Context) {
 
@@ -39,7 +43,8 @@ class VideoTranscoder(private val context: Context) {
         val height: Int,
         val durationMs: Long,
         val bitrateKbps: Int,
-        val fps: Int
+        val fps: Int,
+        val audioBitrateKbps: Int? = null
     )
 
     fun extractVideoInfo(sourcePathOrUri: String): VideoInfo {
@@ -55,15 +60,60 @@ class VideoTranscoder(private val context: Context) {
 
             val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 1920
             val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 1080
-            val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 15_000L
+            val retrieverDurationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()?.takeIf { it > 0L }
             val bitrate = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toIntOrNull()?.let { it / 1000 } ?: 6000
             val fps = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)?.toIntOrNull() ?: 30
+            val extractorInfo = extractExtractorInfo(sourcePathOrUri)
+            // MediaMetadataRetriever silently fails to report a duration for some content://
+            // sources (certain gallery/document providers); falling straight to a fixed 15s in
+            // that case would make every such file's derived bitrate look the same. Cross-check
+            // against MediaExtractor's own track duration before giving up on a real number.
+            val duration = retrieverDurationMs ?: extractorInfo.durationMs ?: 15_000L
 
-            VideoInfo(width, height, duration, bitrate, fps)
+            VideoInfo(width, height, duration, bitrate, fps, extractorInfo.audioBitrateKbps)
         } catch (e: Exception) {
             VideoInfo(1920, 1080, 15_000L, 6000, 30)
         } finally {
             try { retriever.release() } catch (_: Exception) {}
+        }
+    }
+
+    private data class ExtractorInfo(val durationMs: Long?, val audioBitrateKbps: Int?)
+
+    /** Reads the source's real duration and its audio track's own encoded bitrate straight from
+     * the container via MediaExtractor - used as a cross-check/fallback for duration (since
+     * MediaMetadataRetriever can fail silently for some content:// sources) and as the only
+     * source for audio bitrate, since the encoder passes audio through unchanged when no audio
+     * effects are requested (i.e. it does not re-encode audio to a fixed rate). */
+    private fun extractExtractorInfo(sourcePathOrUri: String): ExtractorInfo {
+        val extractor = MediaExtractor()
+        return try {
+            if (sourcePathOrUri.startsWith("content://") || sourcePathOrUri.startsWith("file://")) {
+                extractor.setDataSource(context, Uri.parse(sourcePathOrUri), null)
+            } else if (sourcePathOrUri.startsWith("http://") || sourcePathOrUri.startsWith("https://")) {
+                extractor.setDataSource(sourcePathOrUri, HashMap<String, String>())
+            } else {
+                extractor.setDataSource(sourcePathOrUri)
+            }
+
+            var durationMs: Long? = null
+            var audioBitrateKbps: Int? = null
+            for (i in 0 until extractor.trackCount) {
+                val format = extractor.getTrackFormat(i)
+                val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
+                if (format.containsKey(MediaFormat.KEY_DURATION)) {
+                    val trackDurationMs = format.getLong(MediaFormat.KEY_DURATION) / 1000
+                    if (trackDurationMs > (durationMs ?: 0L)) durationMs = trackDurationMs
+                }
+                if (mime.startsWith("audio/") && format.containsKey(MediaFormat.KEY_BIT_RATE)) {
+                    audioBitrateKbps = (format.getInteger(MediaFormat.KEY_BIT_RATE) / 1000).coerceAtLeast(1)
+                }
+            }
+            ExtractorInfo(durationMs?.takeIf { it > 0L }, audioBitrateKbps)
+        } catch (e: Exception) {
+            ExtractorInfo(null, null)
+        } finally {
+            try { extractor.release() } catch (_: Exception) {}
         }
     }
 
@@ -74,6 +124,10 @@ class VideoTranscoder(private val context: Context) {
 
     /** Whether this device exposes an HEVC encoder; if false, requests fall back to H.264 automatically. */
     fun isHevcEncodingSupported(): Boolean = isEncoderAvailable(MimeTypes.VIDEO_H265)
+
+    /** Whether this device has a real hardware/software encoder for the given codec, so the UI
+     * can warn when a pick will silently fall back to something else at encode time. */
+    fun isCodecSupported(codec: VideoCodec): Boolean = isEncoderAvailable(codec.mimeType)
 
     private fun isEncoderAvailable(mime: String): Boolean {
         return try {
@@ -135,7 +189,15 @@ class VideoTranscoder(private val context: Context) {
         val outcome = CompletableDeferred<Result<Unit>>()
 
         val encoderFactory = DefaultEncoderFactory.Builder(context)
-            .setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(bitrateBps).build())
+            .setRequestedVideoEncoderSettings(
+                VideoEncoderSettings.Builder()
+                    .setBitrate(bitrateBps)
+                    // CBR instead of the default VBR: VBR only targets an average, and hardware
+                    // encoders commonly overshoot it on complex content, which is exactly why
+                    // real output kept coming in bigger than the size estimate predicted.
+                    .setBitrateMode(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
+                    .build()
+            )
             .setEnableFallback(true) // HEVC -> H.264 (or whatever the device actually supports) when unavailable
             .build()
 
@@ -203,7 +265,7 @@ class VideoTranscoder(private val context: Context) {
 
         result.fold(
             onSuccess = {
-                onProgress(1.0f, item.originalFps.toFloat(), 0L, outputFile.length())
+                onProgress(1.0f, item.originalFps.toFloat(), 0L, stabilizedFileLength(outputFile))
                 Result.success(outputFile)
             },
             onFailure = { e ->
@@ -215,6 +277,20 @@ class VideoTranscoder(private val context: Context) {
                 Result.failure(if (e is TranscodePausedException || e is TranscodeCancelledException) e else Exception(message))
             }
         )
+    }
+
+    // MP4 muxers finalize trailing metadata (the moov atom) as their last write; File.length()
+    // read right at the completion callback can catch that mid-flush and under-report the true
+    // final size. Poll until two consecutive reads agree before trusting it.
+    private suspend fun stabilizedFileLength(file: File): Long {
+        var previous = file.length()
+        repeat(10) {
+            delay(150)
+            val current = file.length()
+            if (current == previous && current > 0L) return current
+            previous = current
+        }
+        return previous
     }
 
     private fun resolveMediaUri(sourcePathOrUrl: String): Uri {

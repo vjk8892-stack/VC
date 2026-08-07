@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.VideoQueueItem
 import com.example.ui.components.BatchQueueSection
+import com.example.ui.components.BatchQueueSummaryCard
 import com.example.ui.components.CompressionSettingsSection
 import com.example.ui.components.HeaderBar
 import com.example.ui.components.HistoryLogsSection
@@ -98,6 +99,7 @@ fun MainCompressorScreen(
             HeaderBar(
                 maxCores = viewModel.maxSystemCores,
                 isGpuAvailable = viewModel.isGpuAvailable,
+                totalRamGb = viewModel.totalRamGb,
                 isDarkMode = isDarkMode,
                 onToggleDarkMode = { viewModel.toggleDarkMode() },
                 soundEnabled = soundEnabled,
@@ -107,7 +109,12 @@ fun MainCompressorScreen(
         floatingActionButton = {
             if (queue.isNotEmpty() && !isBatchRunning) {
                 ExtendedFloatingActionButton(
-                    onClick = { viewModel.startBatchProcessing() },
+                    onClick = {
+                        viewModel.startBatchProcessing()
+                        // Jump to the Batch Queue tab so the user immediately sees progress
+                        // bars/status instead of wondering whether the tap registered.
+                        selectedTab = 1
+                    },
                     icon = { Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null) },
                     text = { Text("Compress Batch (${queue.size})") },
                     containerColor = SkyBlue60,
@@ -199,7 +206,8 @@ fun MainCompressorScreen(
                     0 -> { // Studio Tab (Input + Compression Settings + Hardware Allocation)
                         InputSourceSection(
                             onAddLocalVideos = { viewModel.addLocalVideoUris(it) },
-                            onAddUrlSource = { viewModel.addUrlSource(it) }
+                            onAddUrlSource = { viewModel.addUrlSource(it) },
+                            queueItems = queue
                         )
 
                         CompressionSettingsSection(
@@ -210,29 +218,19 @@ fun MainCompressorScreen(
                             onSaveCurrentPreset = { viewModel.saveCustomPreset(it) },
                             useGlobalSettings = useGlobalSettings,
                             onToggleUseGlobalSettings = { viewModel.toggleUseGlobalSettings(it) },
+                            supportedCodecs = viewModel.supportedCodecs,
                             activeVideoItem = queue.firstOrNull()
                         )
 
                         ResourceControlsSection(
                             settings = globalSettings,
-                            maxCores = viewModel.maxSystemCores,
-                            isGpuAvailable = viewModel.isGpuAvailable,
                             onSettingsChanged = { viewModel.updateGlobalSettings { _ -> it } }
                         )
 
                         if (queue.isNotEmpty()) {
-                            BatchQueueSection(
+                            BatchQueueSummaryCard(
                                 queue = queue,
-                                isBatchRunning = isBatchRunning,
-                                isBatchPaused = isBatchPaused,
-                                onStartBatch = { viewModel.startBatchProcessing() },
-                                onPauseBatch = { viewModel.pauseBatch() },
-                                onCancelBatch = { viewModel.cancelBatch() },
-                                onClearQueue = { viewModel.clearQueue() },
-                                onRemoveItem = { viewModel.removeItem(it) },
-                                onReorderQueue = { from, to -> viewModel.reorderQueue(from, to) },
-                                onOpenItemSettings = { editingItem = it },
-                                onPlayVideo = { path, title -> activeVideoPlayer = Pair(path, title) }
+                                onViewQueue = { selectedTab = 1 }
                             )
                         }
                     }
@@ -276,7 +274,8 @@ fun MainCompressorScreen(
             onSaveSettings = { updated ->
                 viewModel.updateItemSettings(updated.id, updated.settings)
                 editingItem = null
-            }
+            },
+            supportedCodecs = viewModel.supportedCodecs
         )
     }
 

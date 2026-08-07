@@ -1,5 +1,6 @@
 package com.example.ui
 
+import android.app.ActivityManager
 import android.app.Application
 import android.content.Context
 import android.media.RingtoneManager
@@ -18,6 +19,7 @@ import com.example.data.model.CompressionItemState
 import com.example.data.model.OutputFormat
 import com.example.data.model.ResolutionPreset
 import com.example.data.model.ResourceMode
+import com.example.data.model.VideoCodec
 import com.example.data.model.VideoCompressionSettings
 import com.example.data.model.VideoQueueItem
 import com.example.data.model.VideoSourceType
@@ -48,14 +50,21 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
     private val downloader = UrlVideoDownloader(application)
     private val transcoder = VideoTranscoder(application)
 
-    // UI State
+    // UI State - all read from the actual device at startup, not fixed numbers.
     val maxSystemCores: Int = Runtime.getRuntime().availableProcessors()
     val isGpuAvailable: Boolean = transcoder.isGpuHardwareAccelerationAvailable()
+    val supportedCodecs: Set<VideoCodec> = VideoCodec.entries.filter { transcoder.isCodecSupported(it) }.toSet()
+    val totalRamGb: Double = run {
+        val activityManager = application.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val memoryInfo = ActivityManager.MemoryInfo()
+        activityManager.getMemoryInfo(memoryInfo)
+        memoryInfo.totalMem / (1024.0 * 1024.0 * 1024.0)
+    }
 
     private val _queue = MutableStateFlow<List<VideoQueueItem>>(emptyList())
     val queue: StateFlow<List<VideoQueueItem>> = _queue.asStateFlow()
 
-    private val _globalSettings = MutableStateFlow(VideoCompressionSettings(cpuCores = maxSystemCores, gpuAcceleration = isGpuAvailable))
+    private val _globalSettings = MutableStateFlow(VideoCompressionSettings())
     val globalSettings: StateFlow<VideoCompressionSettings> = _globalSettings.asStateFlow()
 
     private val _useGlobalSettings = MutableStateFlow(true)
@@ -173,6 +182,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                     originalHeight = info.height,
                     originalBitrateKbps = info.bitrateKbps,
                     originalFps = info.fps,
+                    originalAudioBitrateKbps = info.audioBitrateKbps,
                     settings = _globalSettings.value
                 )
             }
@@ -244,7 +254,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                 it.status == CompressionItemState.QUEUED || it.status == CompressionItemState.PAUSED || it.status == CompressionItemState.FAILED
             }
 
-            for (item in queuedItems) {
+            for ((index, item) in queuedItems.withIndex()) {
                 if (cancelledJobIds.contains(item.id)) continue
 
                 // A paused item keeps retrying (from the start; the encoder has no mid-export
@@ -256,6 +266,14 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                         delay(300)
                     }
                     if (cancelledJobIds.contains(item.id)) break
+                }
+
+                // Cool-down pacing between items per Resource Mode - a real effect (reduces
+                // sustained thermal/battery load in Low Resource Mode) rather than a setting
+                // that looked configurable but didn't change anything about the actual run.
+                if (index < queuedItems.lastIndex && !cancelledJobIds.contains(item.id)) {
+                    val cooldownMs = item.settings.resourceMode.interItemCooldownMs
+                    if (cooldownMs > 0L) delay(cooldownMs)
                 }
             }
 
@@ -278,7 +296,11 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
         if (item.sourceType == VideoSourceType.DIRECT_URL || item.sourceType == VideoSourceType.YOUTUBE) {
             updateItemStatus(item.id, CompressionItemState.DOWNLOADING, progress = 0.05f)
 
-            val downloadResult = downloader.fetchAndDownload(item.sourcePathOrUrl) { progress, downloaded, total ->
+            val downloadResult = downloader.fetchAndDownload(
+                urlStr = item.sourcePathOrUrl,
+                isPaused = { pausedJobIds.contains(item.id) || _isBatchPaused.value },
+                isCancelled = { cancelledJobIds.contains(item.id) }
+            ) { progress, downloaded, total ->
                 updateItemInQueue(item.id) {
                     it.copy(
                         status = CompressionItemState.DOWNLOADING,
@@ -289,9 +311,11 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
             }
 
             if (downloadResult.isFailure) {
-                val err = downloadResult.exceptionOrNull()?.message ?: "Download failed"
-                updateItemStatus(item.id, CompressionItemState.FAILED, error = err)
-                saveToHistory(item.copy(status = CompressionItemState.FAILED, errorMessage = err))
+                val err = downloadResult.exceptionOrNull()
+                if (err is TranscodeCancelledException) return ProcessOutcome.CANCELLED
+                val message = err?.message ?: "Download failed"
+                updateItemStatus(item.id, CompressionItemState.FAILED, error = message)
+                saveToHistory(item.copy(status = CompressionItemState.FAILED, errorMessage = message))
                 return ProcessOutcome.FAILED
             }
 
@@ -313,7 +337,8 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                 originalWidth = info.width,
                 originalHeight = info.height,
                 originalBitrateKbps = info.bitrateKbps,
-                originalFps = info.fps
+                originalFps = info.fps,
+                originalAudioBitrateKbps = info.audioBitrateKbps
             )
             updateItemInQueue(item.id) { updatedItem }
         }
