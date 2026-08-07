@@ -99,6 +99,7 @@ fun MainCompressorScreen(
             HeaderBar(
                 maxCores = viewModel.maxSystemCores,
                 isGpuAvailable = viewModel.isGpuAvailable,
+                totalRamGb = viewModel.totalRamGb,
                 isDarkMode = isDarkMode,
                 onToggleDarkMode = { viewModel.toggleDarkMode() },
                 soundEnabled = soundEnabled,

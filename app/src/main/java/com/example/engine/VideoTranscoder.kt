@@ -60,12 +60,17 @@ class VideoTranscoder(private val context: Context) {
 
             val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 1920
             val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 1080
-            val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 15_000L
+            val retrieverDurationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()?.takeIf { it > 0L }
             val bitrate = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toIntOrNull()?.let { it / 1000 } ?: 6000
             val fps = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)?.toIntOrNull() ?: 30
-            val audioBitrate = extractAudioBitrateKbps(sourcePathOrUri)
+            val extractorInfo = extractExtractorInfo(sourcePathOrUri)
+            // MediaMetadataRetriever silently fails to report a duration for some content://
+            // sources (certain gallery/document providers); falling straight to a fixed 15s in
+            // that case would make every such file's derived bitrate look the same. Cross-check
+            // against MediaExtractor's own track duration before giving up on a real number.
+            val duration = retrieverDurationMs ?: extractorInfo.durationMs ?: 15_000L
 
-            VideoInfo(width, height, duration, bitrate, fps, audioBitrate)
+            VideoInfo(width, height, duration, bitrate, fps, extractorInfo.audioBitrateKbps)
         } catch (e: Exception) {
             VideoInfo(1920, 1080, 15_000L, 6000, 30)
         } finally {
@@ -73,10 +78,14 @@ class VideoTranscoder(private val context: Context) {
         }
     }
 
-    /** The source audio track's own encoded bitrate, when the container exposes it - this is
-     * what the output will actually carry too, since the encoder passes audio through unchanged
-     * when no audio effects are requested (i.e. it does not re-encode audio to a fixed rate). */
-    private fun extractAudioBitrateKbps(sourcePathOrUri: String): Int? {
+    private data class ExtractorInfo(val durationMs: Long?, val audioBitrateKbps: Int?)
+
+    /** Reads the source's real duration and its audio track's own encoded bitrate straight from
+     * the container via MediaExtractor - used as a cross-check/fallback for duration (since
+     * MediaMetadataRetriever can fail silently for some content:// sources) and as the only
+     * source for audio bitrate, since the encoder passes audio through unchanged when no audio
+     * effects are requested (i.e. it does not re-encode audio to a fixed rate). */
+    private fun extractExtractorInfo(sourcePathOrUri: String): ExtractorInfo {
         val extractor = MediaExtractor()
         return try {
             if (sourcePathOrUri.startsWith("content://") || sourcePathOrUri.startsWith("file://")) {
@@ -87,16 +96,22 @@ class VideoTranscoder(private val context: Context) {
                 extractor.setDataSource(sourcePathOrUri)
             }
 
+            var durationMs: Long? = null
+            var audioBitrateKbps: Int? = null
             for (i in 0 until extractor.trackCount) {
                 val format = extractor.getTrackFormat(i)
                 val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
+                if (format.containsKey(MediaFormat.KEY_DURATION)) {
+                    val trackDurationMs = format.getLong(MediaFormat.KEY_DURATION) / 1000
+                    if (trackDurationMs > (durationMs ?: 0L)) durationMs = trackDurationMs
+                }
                 if (mime.startsWith("audio/") && format.containsKey(MediaFormat.KEY_BIT_RATE)) {
-                    return (format.getInteger(MediaFormat.KEY_BIT_RATE) / 1000).coerceAtLeast(1)
+                    audioBitrateKbps = (format.getInteger(MediaFormat.KEY_BIT_RATE) / 1000).coerceAtLeast(1)
                 }
             }
-            null
+            ExtractorInfo(durationMs?.takeIf { it > 0L }, audioBitrateKbps)
         } catch (e: Exception) {
-            null
+            ExtractorInfo(null, null)
         } finally {
             try { extractor.release() } catch (_: Exception) {}
         }

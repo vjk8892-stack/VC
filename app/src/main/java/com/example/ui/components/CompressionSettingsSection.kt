@@ -403,10 +403,10 @@ fun CompressionSettingsSection(
                 )
             }
 
-            if (nativeBitrateKbps != null) {
+            if (nativeBitrateKbps != null && activeVideoItem != null) {
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "Native bitrate: %.1f Mbps - max selectable is capped below this so compression always actually saves space".format(nativeBitrateKbps / 1000.0),
+                    text = "Native bitrate of \"${activeVideoItem.title}\": %.1f Mbps - max selectable is capped below this so compression always actually saves space".format(nativeBitrateKbps / 1000.0),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

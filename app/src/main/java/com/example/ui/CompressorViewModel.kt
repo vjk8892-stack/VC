@@ -1,5 +1,6 @@
 package com.example.ui
 
+import android.app.ActivityManager
 import android.app.Application
 import android.content.Context
 import android.media.RingtoneManager
@@ -49,10 +50,16 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
     private val downloader = UrlVideoDownloader(application)
     private val transcoder = VideoTranscoder(application)
 
-    // UI State
+    // UI State - all read from the actual device at startup, not fixed numbers.
     val maxSystemCores: Int = Runtime.getRuntime().availableProcessors()
     val isGpuAvailable: Boolean = transcoder.isGpuHardwareAccelerationAvailable()
     val supportedCodecs: Set<VideoCodec> = VideoCodec.entries.filter { transcoder.isCodecSupported(it) }.toSet()
+    val totalRamGb: Double = run {
+        val activityManager = application.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val memoryInfo = ActivityManager.MemoryInfo()
+        activityManager.getMemoryInfo(memoryInfo)
+        memoryInfo.totalMem / (1024.0 * 1024.0 * 1024.0)
+    }
 
     private val _queue = MutableStateFlow<List<VideoQueueItem>>(emptyList())
     val queue: StateFlow<List<VideoQueueItem>> = _queue.asStateFlow()
