@@ -19,11 +19,14 @@ enum class VideoCodec(val label: String, val mimeType: String, val description: 
     AV1("AV1", "video/av01", "Next-gen ultra compression")
 }
 
-enum class BitratePreset(val label: String, val targetBitrateKbps: Int) {
-    LOW("Low (Fast / Small size)", 1000),
-    MEDIUM("Medium (Balanced)", 2500),
-    HIGH("High (Best Quality)", 5000),
-    CUSTOM("Custom Bitrate", 0)
+// LOW/MEDIUM/HIGH are no longer fixed kbps numbers - they're fractions of a given video's own
+// real max selectable bitrate (max/3, max/2, max/1), computed via VideoQueueItem.bitrateForPreset()
+// so they stay meaningful regardless of what the source video's bitrate actually is.
+enum class BitratePreset(val label: String, val divisor: Int) {
+    LOW("Low (Smaller File)", 3),
+    MEDIUM("Medium (Balanced)", 2),
+    HIGH("High (Best Quality)", 1),
+    CUSTOM("Custom Bitrate", 1)
 }
 
 // Android's MediaMuxer (and Media3 Transformer, which is built on it) can only write
@@ -63,9 +66,12 @@ data class VideoCompressionSettings(
     val customHeight: Int = 720,
     val videoCodec: VideoCodec = VideoCodec.HEVC_H265,
     val bitrate: BitratePreset = BitratePreset.MEDIUM,
-    // Matches BitratePreset.MEDIUM.targetBitrateKbps so the displayed value and the value
-    // actually used by getEffectiveBitrateKbps() agree before the user touches anything.
-    val customBitrateKbps: Int = 2500,
+    // customBitrateKbps is the single source of truth for the bitrate actually requested,
+    // whichever preset is selected - the UI keeps it in sync with the chosen preset's
+    // computed value (see VideoQueueItem.bitrateForPreset) so there is never a second,
+    // divergent number involved. 4000 matches what MEDIUM resolves to (8000/2) under
+    // bitrateForPreset()'s no-source-yet fallback, before a real video's own max is known.
+    val customBitrateKbps: Int = 4000,
     val format: OutputFormat = OutputFormat.MP4,
     val removeAudio: Boolean = false,
     val resourceMode: ResourceMode = ResourceMode.BALANCED
@@ -95,12 +101,21 @@ data class VideoQueueItem(
     val outputPath: String? = null,
     val settings: VideoCompressionSettings = VideoCompressionSettings()
 ) {
-    fun getEffectiveBitrateKbps(): Int {
-        return if (settings.bitrate == BitratePreset.CUSTOM) {
-            settings.customBitrateKbps
-        } else {
-            settings.bitrate.targetBitrateKbps
-        }
+    /** The requested video bitrate before the source-derived safety cap is applied.
+     * customBitrateKbps is the single source of truth here regardless of which preset is
+     * selected - the UI keeps it in sync with the active preset's computed value, so there is
+     * never a second number that can silently diverge from what's shown on screen. */
+    fun getEffectiveBitrateKbps(): Int = settings.customBitrateKbps
+
+    /** What a given preset actually means for this specific video: LOW/MEDIUM/HIGH are max/3,
+     * max/2 and max/1 of this video's own real max selectable bitrate, not fixed numbers that
+     * would mean wildly different things for a 500kbps clip versus a 20Mbps one. Falls back to a
+     * flat assumption only when the source's real bitrate isn't known yet (e.g. a URL item
+     * before download). */
+    fun bitrateForPreset(preset: BitratePreset): Int {
+        val cap = maxSelectableVideoBitrateKbps() ?: 8000
+        if (preset == BitratePreset.CUSTOM) return cap
+        return (cap / preset.divisor).coerceAtLeast(150)
     }
 
     /** The source's own overall bitrate (video+audio+container), derived from real file size

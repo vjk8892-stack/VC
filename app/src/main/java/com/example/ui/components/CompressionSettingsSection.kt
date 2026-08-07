@@ -103,10 +103,23 @@ fun CompressionSettingsSection(
     val nativeBitrateKbps = activeVideoItem?.copy(settings = settings)?.sourceBitrateKbps()
     val maxSelectableBitrateKbps = activeVideoItem?.copy(settings = settings)?.maxSelectableVideoBitrateKbps()
 
-    LaunchedEffect(maxSelectableBitrateKbps, settings.customBitrateKbps) {
-        val cap = maxSelectableBitrateKbps
-        if (cap != null && settings.customBitrateKbps > cap) {
-            onSettingsChanged(settings.copy(customBitrateKbps = cap))
+    // Basis for computing what LOW/MEDIUM/HIGH actually mean in kbps for this video: the real
+    // active item's cap when known, else the same flat fallback bitrateForPreset() uses.
+    val presetBasisItem = (activeVideoItem ?: VideoQueueItem(
+        title = "", sourceType = VideoSourceType.LOCAL_FILE, sourcePathOrUrl = ""
+    )).copy(settings = settings)
+
+    // customBitrateKbps is the single number used everywhere (display, slider, encoder) - keep
+    // it in sync with whichever preset is selected so a shown value can never silently diverge
+    // from what actually gets requested.
+    LaunchedEffect(maxSelectableBitrateKbps, settings.bitrate) {
+        if (settings.bitrate != BitratePreset.CUSTOM) {
+            val computed = presetBasisItem.bitrateForPreset(settings.bitrate)
+            if (settings.customBitrateKbps != computed) {
+                onSettingsChanged(settings.copy(customBitrateKbps = computed))
+            }
+        } else if (maxSelectableBitrateKbps != null && settings.customBitrateKbps > maxSelectableBitrateKbps) {
+            onSettingsChanged(settings.copy(customBitrateKbps = maxSelectableBitrateKbps))
         }
     }
 
@@ -405,14 +418,16 @@ fun CompressionSettingsSection(
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(BitratePreset.entries) { preset ->
                     val isSelected = settings.bitrate == preset
+                    val previewKbps = presetBasisItem.bitrateForPreset(preset)
                     FilterChip(
                         selected = isSelected,
                         onClick = {
-                            val requestedKbps = if (preset != BitratePreset.CUSTOM) preset.targetBitrateKbps else settings.customBitrateKbps
-                            val newKbps = maxSelectableBitrateKbps?.let { requestedKbps.coerceAtMost(it) } ?: requestedKbps
-                            onSettingsChanged(settings.copy(bitrate = preset, customBitrateKbps = newKbps))
+                            onSettingsChanged(settings.copy(bitrate = preset, customBitrateKbps = previewKbps))
                         },
-                        label = { Text(preset.label, fontSize = 12.sp) },
+                        label = {
+                            val labelText = if (preset == BitratePreset.CUSTOM) preset.label else "${preset.label} (~$previewKbps kbps)"
+                            Text(labelText, fontSize = 12.sp)
+                        },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = SkyBlue60,
                             selectedLabelColor = MaterialTheme.colorScheme.onPrimary

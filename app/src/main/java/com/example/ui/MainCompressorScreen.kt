@@ -108,7 +108,12 @@ fun MainCompressorScreen(
         floatingActionButton = {
             if (queue.isNotEmpty() && !isBatchRunning) {
                 ExtendedFloatingActionButton(
-                    onClick = { viewModel.startBatchProcessing() },
+                    onClick = {
+                        viewModel.startBatchProcessing()
+                        // Jump to the Batch Queue tab so the user immediately sees progress
+                        // bars/status instead of wondering whether the tap registered.
+                        selectedTab = 1
+                    },
                     icon = { Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null) },
                     text = { Text("Compress Batch (${queue.size})") },
                     containerColor = SkyBlue60,

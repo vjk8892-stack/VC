@@ -56,12 +56,19 @@ fun ItemSettingsDialog(
     var tempSettings by remember { mutableStateOf(item.settings) }
 
     val nativeBitrateKbps = item.sourceBitrateKbps()
-    val maxSelectableBitrateKbps = item.copy(settings = tempSettings).maxSelectableVideoBitrateKbps()
+    val basisItem = item.copy(settings = tempSettings)
+    val maxSelectableBitrateKbps = basisItem.maxSelectableVideoBitrateKbps()
 
-    LaunchedEffect(maxSelectableBitrateKbps, tempSettings.customBitrateKbps) {
-        val cap = maxSelectableBitrateKbps
-        if (cap != null && tempSettings.customBitrateKbps > cap) {
-            tempSettings = tempSettings.copy(customBitrateKbps = cap)
+    // Keep customBitrateKbps - the single number used for display, slider and encoding - in
+    // sync with this specific file's own cap, same as the global Compression Settings screen.
+    LaunchedEffect(maxSelectableBitrateKbps, tempSettings.bitrate) {
+        if (tempSettings.bitrate != BitratePreset.CUSTOM) {
+            val computed = basisItem.bitrateForPreset(tempSettings.bitrate)
+            if (tempSettings.customBitrateKbps != computed) {
+                tempSettings = tempSettings.copy(customBitrateKbps = computed)
+            }
+        } else if (maxSelectableBitrateKbps != null && tempSettings.customBitrateKbps > maxSelectableBitrateKbps) {
+            tempSettings = tempSettings.copy(customBitrateKbps = maxSelectableBitrateKbps)
         }
     }
 
